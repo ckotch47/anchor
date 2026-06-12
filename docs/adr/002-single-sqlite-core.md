@@ -12,6 +12,6 @@
   - Минусы: нужно аккуратно проектировать блокировки, миграции и рост индексов.
 - Consequences:
   - Нужны migrations и schema versioning.
+  - CLI startup should auto-apply pending migrations before dispatch, while `db migrate` remains the explicit bootstrap/repair command.
   - Для длинных текстов потребуются chunks.
   - Для поиска лучше заранее разделить raw content и search indexes.
-

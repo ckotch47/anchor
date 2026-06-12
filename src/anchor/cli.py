@@ -16,19 +16,22 @@ def health(
     format: Annotated[str, typer.Option("--format")] = "json",
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
-    container = build_container(profile=profile)
-    result = container.health_service.health()
-    payload: dict[str, Any] = {
-        "ok": True,
-        "command": "health",
-        "data": result.model_dump(),
-        "meta": {
-            "view": container.config.runtime.default_view,
-            "profile": container.profile_name,
-            "config_path": str(container.config_path),
-        },
-    }
-    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    try:
+        container = build_container(profile=profile)
+        result = container.health_service.health()
+        payload: dict[str, Any] = {
+            "ok": True,
+            "command": "health",
+            "data": result.model_dump(),
+            "meta": {
+                "view": container.config.runtime.default_view,
+                "profile": container.profile_name,
+                "config_path": str(container.config_path),
+            },
+        }
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    except Exception as exc:
+        _emit_error("health", "DB_MIGRATION_FAILED", str(exc))
 
 
 @app.command(name="config")
@@ -39,8 +42,8 @@ def config_command(
     value: Annotated[str | None, typer.Option("--value")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
-    container = build_container(profile=profile)
     try:
+        container = build_container(profile=profile)
         match action:
             case "get":
                 _handle_config_get(container, profile=profile)
@@ -56,6 +59,8 @@ def config_command(
                 _emit_error("config", "INVALID_ARGS", "config action must be 'get' or 'set'")
     except ValueError as exc:
         _emit_error("config", "INVALID_ARGS", str(exc))
+    except Exception as exc:
+        _emit_error("config", "DB_MIGRATION_FAILED", str(exc))
 
 
 def _handle_config_get(container: Any, profile: str | None = None) -> None:
@@ -116,30 +121,36 @@ def db_command(
     action: Annotated[str, typer.Argument(..., help="migrate")],
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
-    container = build_container(profile=profile)
     try:
+        container = build_container(profile=profile, auto_migrate=False)
         match action:
             case "migrate":
-                result = container.migration_service.migrate()
-                payload = {
-                    "ok": True,
-                    "command": "db.migrate",
-                    "data": {
-                        "database_path": result.database_path,
-                        "applied": result.applied,
-                        "current_version": result.current_version,
-                        "applied_versions": result.applied_versions,
-                    },
-                    "meta": {
-                        "view": container.config.runtime.default_view,
-                        "profile": container.profile_name,
-                    },
-                }
-                typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+                _handle_db_migrate(container)
             case _:
                 _emit_error("db", "INVALID_ARGS", "db action must be 'migrate'")
+    except typer.Exit:
+        raise
     except Exception as exc:
         _emit_error("db", "DB_MIGRATION_FAILED", str(exc))
+
+
+def _handle_db_migrate(container: Any) -> None:
+    result = container.migration_service.migrate()
+    payload = {
+        "ok": True,
+        "command": "db.migrate",
+        "data": {
+            "database_path": result.database_path,
+            "applied": result.applied,
+            "current_version": result.current_version,
+            "applied_versions": result.applied_versions,
+        },
+        "meta": {
+            "view": container.config.runtime.default_view,
+            "profile": container.profile_name,
+        },
+    }
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def register_commands() -> None:

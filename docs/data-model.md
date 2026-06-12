@@ -1,33 +1,45 @@
 # Data Model
 
-## Основные сущности
+## MVP schema
+
+Один SQLite-файл, одна доменная таблица `items`, несколько derived-таблиц вокруг неё.
 
 - `items`
-  - общая таблица для memory, notes, history, tasks.
-  - поля: `id`, `type`, `title`, `body`, `status`, `source`, `created_at`, `updated_at`, `pinned`.
+  - source of truth для `memory`, `notes`, `history`, `tasks`
+  - поля: `id`, `type`, `title`, `body`, `status`, `source`, `created_at`, `updated_at`, `pinned`
 - `item_chunks`
-  - разбиение длинных текстов на чанки для поиска и embeddings.
-  - поля: `id`, `item_id`, `chunk_index`, `chunk_text`, `token_count`.
+  - нормализованные чанки длинного текста для FTS и embedding pipeline
+  - поля: `id`, `item_id`, `chunk_index`, `chunk_text`, `token_count`
 - `item_embeddings`
-  - вектора для semantic search.
-  - поля: `item_id`, `chunk_id`, `model`, `embedding`, `created_at`.
+  - вектора для semantic search по чанкам
+  - поля: `item_id`, `chunk_id`, `model`, `embedding`, `created_at`
 - `item_tags`
-  - теги для фильтрации.
-  - поля: `item_id`, `tag`.
+  - теги для фильтрации и coarse retrieval
+  - поля: `item_id`, `tag`
 - `item_links`
-  - связи между задачами, заметками, памятью и историей.
-  - поля: `from_item_id`, `to_item_id`, `link_type`, `created_at`.
+  - связи между сущностями, чтобы retrieval мог собирать related context
+  - поля: `from_item_id`, `to_item_id`, `link_type`, `created_at`
 - `events`
-  - audit trail действий.
-  - поля: `id`, `entity_type`, `entity_id`, `event_type`, `payload`, `created_at`.
+  - audit trail и история изменений
+  - поля: `id`, `entity_type`, `entity_id`, `event_type`, `payload`, `created_at`
 - `settings`
-  - runtime config и versioning.
+  - runtime settings и служебные ключи
 - `schema_migrations`
-  - журнал миграций.
-  - поля: `version`, `applied_at`, `checksum`, `status`.
+  - версия схемы и история применённых миграций
+  - поля: `version`, `name`, `checksum`, `applied_at`, `status`
 - `index_states`
-  - lifecycle derived индексов.
-  - поля: `entity_type`, `entity_id`, `index_type`, `state`, `indexed_at`, `stale_since`, `last_error`.
+  - lifecycle derived индексов
+  - поля: `entity_type`, `entity_id`, `index_type`, `state`, `indexed_at`, `stale_since`, `last_error`
+
+## Retrieval contract
+
+- `items.body` is the canonical text, not the search index.
+- `item_chunks.chunk_text` is the unit for chunk-level FTS and embedding generation.
+- `item_embeddings.embedding` is derived and can be rebuilt from `items` + `item_chunks`.
+- `item_links` are used to pull neighboring context for agent requests.
+- `events` are append-only and never replace source of truth rows.
+- If derived data is stale, the source row is still valid and retrievable.
+- Missing embeddings must degrade to text/FTS retrieval, not fail the command.
 
 ## Индексы
 

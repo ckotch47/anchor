@@ -20,12 +20,14 @@ class Container:
     migration_service: MigrationService
 
 
-def build_container(profile: str | None = None) -> Container:
+def build_container(profile: str | None = None, auto_migrate: bool = True) -> Container:
     repo = FileSystemConfigRepository()
     config, config_path, profile_name = repo.load(profile=profile)
     health_service = HealthService(config=config)
     config_service = ConfigService(repository=repo)
     migration_service = MigrationService(repository=SqliteMigrationRepository())
+    if auto_migrate:
+        migration_service.migrate()
     return Container(
         config=config,
         config_path=str(config_path),

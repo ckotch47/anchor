@@ -10,6 +10,7 @@
 - If external model/provider is unavailable, the tool should fall back to offline-only mode without generation.
 - Agent-facing requests should support explicit per-command knobs for view, fields, limit, and budget.
 - SQLite migrations should be forward-only, versioned, and protected by backup before upgrade.
+- CLI startup should auto-apply pending migrations before command dispatch; `db migrate` remains the explicit repair/bootstrap command.
 - Write sequencing should use WAL/busy_timeout/retry instead of introducing a server.
 - Storage should stay file-based and simple.
 - Derived indexes should have a lifecycle separate from source-of-truth records.

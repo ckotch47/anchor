@@ -20,6 +20,12 @@
 - Command-specific flags can narrow the request further, but they must not break the shared envelope.
 - If a command does not need a knob, it should ignore it rather than failing.
 
+## Negative request contract
+
+- Future write commands such as `notes add` and `tasks add` must reject empty payloads with `INVALID_ARGS`.
+- Future search commands must reject invalid `--limit` values with `INVALID_ARGS` instead of silently clamping.
+- If a command requires generation and the provider is unavailable, it must emit `OFFLINE_ONLY` or `PROVIDER_OFFLINE` with a stable JSON error envelope.
+
 ## Response format
 
 - Success envelope:
@@ -86,6 +92,7 @@
 - `anchor history search`
 - `anchor db migrate`
 - `anchor db reindex`
+- CLI startup applies pending SQLite migrations before command dispatch.
 - `db migrate` creates or updates the local SQLite database at `~/.qatoria/anchor/anchor.sqlite3`.
 - `anchor backup export`
 - `anchor backup import`

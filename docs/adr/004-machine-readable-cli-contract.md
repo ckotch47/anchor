@@ -15,3 +15,4 @@
   - Нужны стабильные error codes.
   - Команды должны отдавать минимально достаточный payload, а не весь объект целиком.
   - Для интерактивного UX можно иметь отдельный presentation layer, но не в core contract.
+  - MCP over stdio может использовать тот же structured contract как transport-обёртку поверх core use-cases.

@@ -9,6 +9,7 @@
 - add output budget rules for agent-facing commands
 - add per-command request knobs and response envelope
 - add schema version tracking and pre-migration backup
+- make CLI startup apply pending migrations before dispatch
 - add `health` and `db migrate`
 
 ## Phase 2: Core entities
@@ -40,6 +41,7 @@
 
 - add tests for CLI contract
 - add migration tests
+- add negative contract tests for empty payloads, invalid limits, and provider-offline paths
 - add search quality checks
 - add provider fallback behavior
 - add documentation polish

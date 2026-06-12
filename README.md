@@ -28,6 +28,7 @@ Qatoria Anchor is a local CLI tool for agents.
 
 - Один локальный инстанс на пользователя.
 - Один SQLite-контур как source of truth.
+- При старте CLI автоматически применяет pending migrations, чтобы агент не управлял bootstrap вручную.
 - CLI как машинный протокол для агентов.
 - OpenAI-compatible модели только как внешний provider для embeddings и rerank.
 
