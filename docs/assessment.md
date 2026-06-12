@@ -1,0 +1,21 @@
+# Assessment
+
+- Goal: сделать локальный CLI-инструмент для агентов с устойчивым машинным контрактом, который хранит память, заметки, историю и задачи в SQLite и уменьшает token burn через компактный retrieval по FTS, embeddings и rerank.
+- Scope in: CLI, SQLite, migrations, FTS, embeddings, rerank, export/import, health, backup, local config.
+- Scope out: веб-API, shared server, multi-user backend, remote sync как обязательная часть MVP.
+- Constraints: один инстанс на пользователя, работа локально, агент должен уметь вызывать команды без интерактива, вывод должен быть machine-readable.
+- Success criteria: агент получает короткие structured ответы, не тратит лишние токены на полные контексты, и может собирать следующий шаг без веб-API.
+- Options:
+  - CLI-first + SQLite core: основной вариант.
+  - Local server + CLI wrapper: лишняя инфраструктура для текущей цели.
+  - Pure file-based storage: проще, но хуже для поиска и эволюции схемы.
+- Risks:
+  - CLI может стать неудобным, если команды будут слишком разговорными.
+  - SQLite write-lock и миграции могут мешать при параллельной работе.
+  - Provider-зависимость на embeddings/rerank может ломать автономность.
+  - Слишком раннее дробление на сущности может запутать MVP.
+- Recommendation:
+  - Делать CLI-first с одной SQLite-базой и machine-readable контрактом.
+  - Подключать embeddings и rerank через OpenAI-compatible client.
+  - Держать архитектуру расширяемой до будущего server/sync слоя, но не вводить его сейчас.
+- Approval status: approved for documentation and implementation planning.
