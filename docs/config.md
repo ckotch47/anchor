@@ -49,4 +49,5 @@ limit = 50
 - one file in the user home directory;
 - explicit overrides from CLI flags win over config;
 - config should carry provider URL, model names, and vector settings;
+- provider URL may point to a local OpenAI-compatible endpoint;
 - profiles are optional and live in the same file.

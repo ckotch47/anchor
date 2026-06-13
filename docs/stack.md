@@ -15,7 +15,8 @@
 
 - `typer` for CLI entrypoint and subcommands
 - `pydantic` for config and structured schemas
-- `openai` official SDK for embeddings and rerank provider calls
+- `openai` official SDK for embeddings and rerank provider calls against an OpenAI-compatible endpoint
+- `sqlite-vector` for in-database vector search
 - built-in `sqlite3` for local storage
 
 ## Optional helpers
@@ -33,6 +34,7 @@
 
 ## Notes
 
-- The stack is intentionally small.
+- The stack is intentionally small but production-oriented.
 - Packaging/distribution remains a separate decision.
+- `sqlite-rag`, `sqlite-memory`, and `sqlite-ai` are useful references and future extension candidates, but not mandatory runtime dependencies for the first production slice.
 - If the search pipeline later needs a faster native path, the storage contract should stay unchanged.

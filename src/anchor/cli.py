@@ -5,8 +5,8 @@ from typing import Annotated, Any
 
 import typer
 
-from anchor.container import build_container
 from anchor.application.config_service import ConfigResult
+from anchor.container import build_container
 
 app = typer.Typer(add_completion=False, help="Qatoria Anchor")
 

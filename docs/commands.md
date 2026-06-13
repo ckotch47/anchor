@@ -78,7 +78,53 @@
 - `config get` returns the full effective config plus the resolved config path.
 - `config set` writes the updated config back to the user-folder TOML file.
 
-## Команды MVP
+## Current commands
+
+### `anchor health`
+
+- Describes whether the local core is ready and which config/profile was resolved.
+- Useful as the first machine check before any agent workflow.
+
+Example:
+
+```bash
+anchor health
+```
+
+### `anchor config get`
+
+- Returns the effective runtime/provider/vector config for the selected profile.
+- Use this when an agent needs to confirm provider URL, model names, or defaults.
+
+Example:
+
+```bash
+anchor config get --profile full
+```
+
+### `anchor config set`
+
+- Writes a single config field back to the user TOML file.
+- Use this for per-user tuning of defaults, provider settings, or vector settings.
+
+Example:
+
+```bash
+anchor config set --section runtime --key default_view --value full
+```
+
+### `anchor db migrate`
+
+- Creates or updates the local SQLite schema.
+- Runs automatically on CLI start, but stays available as an explicit bootstrap/repair command.
+
+Example:
+
+```bash
+anchor db migrate
+```
+
+## Target command set
 
 - `anchor memory capture`
 - `anchor memory search`
@@ -99,6 +145,13 @@
 - `anchor health`
 - `anchor config get`
 - `anchor config set`
+
+## Future command pattern
+
+- `memory` is the unified retrieval surface over notes/tasks/history, not a separate source of truth.
+- `notes`, `history`, and `tasks` reuse the same retrieval-ready SQLite core.
+- Each domain owns its table(s), while search uses shared document spine + derived retrieval tables.
+- Semantic vector retrieval and rerank are first-class layers on top of that core, not a separate database.
 
 ## Пример JSON ответа
 

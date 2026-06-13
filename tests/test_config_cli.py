@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from click.exceptions import Exit
+from typer import Exit
 
 from anchor.cli import config_command
 

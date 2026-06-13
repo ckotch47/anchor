@@ -1,6 +1,6 @@
 # Implementation Plan
 
-## Phase 1: Foundation
+## Phase 1: Platform foundation
 
 - create CLI entrypoint
 - add config loader
@@ -12,23 +12,24 @@
 - make CLI startup apply pending migrations before dispatch
 - add `health` and `db migrate`
 
-## Phase 2: Core entities
+## Phase 2: Domain surfaces
 
-- implement `memory`, `notes`, `history`, `tasks`
+- implement `notes`, `tasks`, `history`
+- add domain-specific tables for each context
 - add create/list/search/show/update flows
-- add link support between entities
+- add link support between documents
 - add events/audit trail
 
-## Phase 3: Retrieval
+## Phase 3: Retrieval engine
 
 - add FTS search
 - add chunking for long content
 - add embeddings generation
-- add vector retrieval
+- add vector retrieval with `sqlite-vector`
 - add rerank for top-k
 - add compact projection commands to avoid full-context responses
 
-## Phase 4: Operations
+## Phase 4: Operations and resilience
 
 - add export/import
 - add backup/restore

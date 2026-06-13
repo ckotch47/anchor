@@ -28,14 +28,17 @@ Qatoria Anchor is a local CLI tool for agents.
 
 - Один локальный инстанс на пользователя.
 - Один SQLite-контур как source of truth.
+- Shared document spine + domain tables for notes, tasks, and history.
+- Retrieval-ready from day one: FTS, vector search, embeddings, rerank.
 - При старте CLI автоматически применяет pending migrations, чтобы агент не управлял bootstrap вручную.
 - CLI как машинный протокол для агентов.
-- OpenAI-compatible модели только как внешний provider для embeddings и rerank.
+- OpenAI-compatible модели как внешний provider для embeddings и rerank, preferably local.
 
 ## Документы
 
 - [Naming](./docs/naming.md)
 - [Assessment](./docs/assessment.md)
+- [Production architecture](./docs/production-architecture.md)
 - [ADR index](./docs/adr/README.md)
 - [Stack](./docs/stack.md)
 - [Implementation plan](./docs/implementation-plan.md)
@@ -47,6 +50,22 @@ Qatoria Anchor is a local CLI tool for agents.
 - [Agent usage](./docs/agent-usage.md)
 - [Open questions](./docs/open-questions.md)
 - [Changelog](./CHANGELOG.md)
+
+## Быстрый старт
+
+```bash
+make venv
+make install
+make run
+```
+
+Или вручную:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/anchor --help
+```
 
 ## Границы
 

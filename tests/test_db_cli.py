@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from click.exceptions import Exit
+from typer import Exit
 
 from anchor.cli import db_command
 
@@ -31,9 +31,8 @@ class DbCliTest(unittest.TestCase):
         container = patch("anchor.cli.build_container")
         with container as build_container_mock:
             build_container_mock.return_value.migration_service.migrate.side_effect = RuntimeError("boom")
-            with patch("typer.echo") as echo_mock:
-                with self.assertRaises(Exit):
-                    db_command("migrate")
+            with patch("typer.echo") as echo_mock, self.assertRaises(Exit):
+                db_command("migrate")
 
         payload = json.loads(echo_mock.call_args.args[0])
         self.assertFalse(payload["ok"])

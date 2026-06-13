@@ -17,12 +17,15 @@
 - Config should live in the user home folder as a single TOML file with optional profiles.
 - Stable error codes should be documented and machine-readable.
 - Tests and examples should be part of the plan from the start.
+- Production architecture should use a shared document spine plus separate domain tables for notes, tasks, and history.
+- Retrieval should include lexical search, vector search, embeddings, and rerank from the first production slice.
 
 ## Needs more design
 
 - Exact default values for per-command limits and budgets.
 - Which commands expose `full` view by default, if any.
 - Packaging/distribution choice.
+- Exact shape of domain-specific metadata fields for notes, tasks, and history.
 
 ## Current stance
 

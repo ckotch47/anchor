@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from anchor.config import default_database_path
@@ -41,53 +41,80 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     status TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS items (
+CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,
-    type TEXT NOT NULL,
+    document_type TEXT NOT NULL,
     title TEXT NOT NULL,
     body TEXT NOT NULL,
-    status TEXT NOT NULL,
     source TEXT NOT NULL,
+    source_ref TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    pinned INTEGER NOT NULL DEFAULT 0
+    deleted_at TEXT,
+    CHECK (document_type IN ('note', 'task', 'history'))
 );
 
-CREATE TABLE IF NOT EXISTS item_chunks (
+CREATE TABLE IF NOT EXISTS notes (
+    document_id TEXT PRIMARY KEY,
+    note_kind TEXT NOT NULL DEFAULT 'note',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    archived_at TEXT,
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    document_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    due_at TEXT,
+    completed_at TEXT,
+    blocked_reason TEXT,
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS history_entries (
+    document_id TEXT PRIMARY KEY,
+    entry_type TEXT NOT NULL,
+    actor TEXT NOT NULL DEFAULT 'agent',
+    payload TEXT NOT NULL,
+    correlation_id TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS document_chunks (
     id TEXT PRIMARY KEY,
-    item_id TEXT NOT NULL,
+    document_id TEXT NOT NULL,
     chunk_index INTEGER NOT NULL,
     chunk_text TEXT NOT NULL,
     token_count INTEGER NOT NULL,
-    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS item_embeddings (
-    item_id TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS chunk_embeddings (
     chunk_id TEXT NOT NULL,
     model TEXT NOT NULL,
-    embedding TEXT NOT NULL,
+    embedding BLOB NOT NULL,
     created_at TEXT NOT NULL,
-    PRIMARY KEY (item_id, chunk_id),
-    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE,
-    FOREIGN KEY (chunk_id) REFERENCES item_chunks(id) ON DELETE CASCADE
+    PRIMARY KEY (chunk_id, model),
+    FOREIGN KEY (chunk_id) REFERENCES document_chunks(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS item_tags (
-    item_id TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS document_tags (
+    document_id TEXT NOT NULL,
     tag TEXT NOT NULL,
-    PRIMARY KEY (item_id, tag),
-    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+    PRIMARY KEY (document_id, tag),
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS item_links (
-    from_item_id TEXT NOT NULL,
-    to_item_id TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS document_links (
+    from_document_id TEXT NOT NULL,
+    to_document_id TEXT NOT NULL,
     link_type TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    PRIMARY KEY (from_item_id, to_item_id, link_type),
-    FOREIGN KEY (from_item_id) REFERENCES items(id) ON DELETE CASCADE,
-    FOREIGN KEY (to_item_id) REFERENCES items(id) ON DELETE CASCADE
+    PRIMARY KEY (from_document_id, to_document_id, link_type),
+    FOREIGN KEY (from_document_id) REFERENCES documents(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_document_id) REFERENCES documents(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -100,8 +127,11 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
+    scope TEXT NOT NULL DEFAULT 'runtime',
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (scope, key)
 );
 
 CREATE TABLE IF NOT EXISTS index_states (
@@ -115,9 +145,16 @@ CREATE TABLE IF NOT EXISTS index_states (
     PRIMARY KEY (entity_type, entity_id, index_type)
 );
 
-CREATE INDEX IF NOT EXISTS idx_items_type_status_created_at ON items(type, status, created_at);
-CREATE INDEX IF NOT EXISTS idx_item_links_from_item_id ON item_links(from_item_id);
-CREATE INDEX IF NOT EXISTS idx_item_links_to_item_id ON item_links(to_item_id);
+CREATE INDEX IF NOT EXISTS idx_documents_type_updated_at ON documents(document_type, updated_at);
+CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source, source_ref);
+CREATE INDEX IF NOT EXISTS idx_notes_pinned_archived_at ON notes(pinned, archived_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_priority_due_at ON tasks(status, priority, due_at);
+CREATE INDEX IF NOT EXISTS idx_history_entries_actor ON history_entries(actor);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id_chunk_index ON document_chunks(document_id, chunk_index);
+CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_model ON chunk_embeddings(model);
+CREATE INDEX IF NOT EXISTS idx_document_tags_tag ON document_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_document_links_from_document_id ON document_links(from_document_id);
+CREATE INDEX IF NOT EXISTS idx_document_links_to_document_id ON document_links(to_document_id);
 CREATE INDEX IF NOT EXISTS idx_schema_migrations_version ON schema_migrations(version);
 CREATE INDEX IF NOT EXISTS idx_index_states_state_type ON index_states(state, index_type);
 """.strip(),
@@ -189,7 +226,7 @@ class SqliteMigrationRepository:
                 migration.version,
                 migration.name,
                 migration.checksum,
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
                 "applied",
             ),
         )

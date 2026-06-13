@@ -40,7 +40,7 @@ class AppConfig(BaseModel):
     profiles: dict[str, ProfileConfig] = Field(default_factory=dict)
 
     @classmethod
-    def default(cls) -> "AppConfig":
+    def default(cls) -> AppConfig:
         return cls(
             profiles={
                 "default": ProfileConfig(view="compact", limit=20),

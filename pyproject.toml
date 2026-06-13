@@ -14,6 +14,19 @@ dependencies = [
   "openai>=1.40,<2.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.6,<1.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "RUF"]
+ignore = ["E501"]
+
 [project.scripts]
 anchor = "anchor.main:main"
 

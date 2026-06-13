@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-import sqlite3
 
 from anchor.adapters.filesystem_config_repository import FileSystemConfigRepository
-from anchor.application.config_service import ConfigService
 from anchor.adapters.sqlite_migration_repository import SqliteMigrationRepository
+from anchor.application.config_service import ConfigService
 
 
 class ConfigRepositoryTest(unittest.TestCase):
@@ -61,5 +61,16 @@ class ConfigRepositoryTest(unittest.TestCase):
         self.assertEqual(result.applied, 1)
         self.assertEqual(result.current_version, 1)
         self.assertIn("schema_migrations", tables)
-        self.assertIn("items", tables)
+        self.assertIn("documents", tables)
+        self.assertIn("notes", tables)
+        self.assertIn("tasks", tables)
+        self.assertIn("history_entries", tables)
+        self.assertIn("document_chunks", tables)
+        self.assertIn("chunk_embeddings", tables)
+        self.assertIn("document_tags", tables)
+        self.assertIn("document_links", tables)
+        self.assertIn("events", tables)
+        self.assertIn("settings", tables)
+        self.assertIn("index_states", tables)
+        self.assertNotIn("items", tables)
         self.assertEqual(version_rows, [(1,)])

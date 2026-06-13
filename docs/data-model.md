@@ -1,58 +1,68 @@
 # Data Model
 
-## MVP schema
+## Target schema
 
-Один SQLite-файл, одна доменная таблица `items`, несколько derived-таблиц вокруг неё.
+Anchor uses one SQLite database with a shared document spine and separate domain tables.
 
-- `items`
-  - source of truth для `memory`, `notes`, `history`, `tasks`
-  - поля: `id`, `type`, `title`, `body`, `status`, `source`, `created_at`, `updated_at`, `pinned`
-- `item_chunks`
-  - нормализованные чанки длинного текста для FTS и embedding pipeline
-  - поля: `id`, `item_id`, `chunk_index`, `chunk_text`, `token_count`
-- `item_embeddings`
-  - вектора для semantic search по чанкам
-  - поля: `item_id`, `chunk_id`, `model`, `embedding`, `created_at`
-- `item_tags`
-  - теги для фильтрации и coarse retrieval
-  - поля: `item_id`, `tag`
-- `item_links`
-  - связи между сущностями, чтобы retrieval мог собирать related context
-  - поля: `from_item_id`, `to_item_id`, `link_type`, `created_at`
-- `events`
-  - audit trail и история изменений
-  - поля: `id`, `entity_type`, `entity_id`, `event_type`, `payload`, `created_at`
-- `settings`
-  - runtime settings и служебные ключи
-- `schema_migrations`
-  - версия схемы и история применённых миграций
-  - поля: `version`, `name`, `checksum`, `applied_at`, `status`
+- `documents`
+  - canonical row for text content, source, timestamps, and stable identity
+  - shared by notes, tasks, and history
+- `notes`
+  - note-specific metadata and note lifecycle fields
+  - 1:1 or 1:n with `documents`, depending on future note structure
+- `tasks`
+  - task-specific state, priority, due/completion fields
+  - 1:1 with `documents`
+- `history_entries`
+  - append-only working history and activity trace
+  - 1:1 with `documents`
+- `document_tags`
+  - filtering and coarse retrieval
+- `document_links`
+  - context graph for related records and agent follow-up
+
+Derived and operational tables:
+
+- `document_chunks`
+  - chunking for long text and retrieval candidates
+- `chunk_embeddings`
+  - vector representations for semantic search
 - `index_states`
-  - lifecycle derived индексов
-  - поля: `entity_type`, `entity_id`, `index_type`, `state`, `indexed_at`, `stale_since`, `last_error`
+  - lifecycle of derived data and reindex state
+- `events`
+  - audit trail of user and system actions
+- `settings`
+  - runtime and system settings
+- `schema_migrations`
+  - schema versioning and applied migration history
+
+## Domain contract
+
+- `documents.body` is the canonical text source.
+- `notes`, `tasks`, and `history_entries` hold domain-specific state.
+- `memory` is a read model over the domain tables, not a separate source of truth.
+- Derived search data must be rebuildable from the canonical tables.
 
 ## Retrieval contract
 
-- `items.body` is the canonical text, not the search index.
-- `item_chunks.chunk_text` is the unit for chunk-level FTS and embedding generation.
-- `item_embeddings.embedding` is derived and can be rebuilt from `items` + `item_chunks`.
-- `item_links` are used to pull neighboring context for agent requests.
-- `events` are append-only and never replace source of truth rows.
-- If derived data is stale, the source row is still valid and retrievable.
-- Missing embeddings must degrade to text/FTS retrieval, not fail the command.
+- `document_chunks.chunk_text` is the unit for lexical and semantic retrieval.
+- `chunk_embeddings.embedding` is derived and can be recomputed.
+- `document_links` are used to pull neighboring context.
+- `events` are append-only and never replace canonical rows.
+- If vector or rerank data is stale or missing, lexical retrieval must still work.
 
-## Индексы
+## Indices
 
-- FTS индекс по `title` и `body` или по chunk-таблице.
-- Индекс по `type`, `status`, `created_at`.
-- Индекс по `item_links.from_item_id` и `item_links.to_item_id`.
-- Индекс по `schema_migrations.version`.
-- Индекс по `index_states.state` и `index_states.index_type`.
+- FTS over canonical text and/or chunks.
+- Index on document type/state/timestamps where applicable.
+- Index on `document_links` source and target ids.
+- Index on `schema_migrations.version`.
+- Index on `index_states.state` and `index_states.index_type`.
 
-## Нормы хранения
+## Storage norms
 
-- Raw text хранить отдельно от derived search data.
-- Embeddings не считать source of truth.
-- Search index можно пересобирать из `items` и `item_chunks`.
-- Source-of-truth записи должны сохраняться независимо от состояния derived индексов.
-- Derived индексы могут переходить в `pending`, `stale`, `ready`, `error`.
+- Canonical rows and derived retrieval data are separate concerns.
+- Search data can be rebuilt from `documents` + domain tables.
+- Missing embeddings must degrade to text retrieval, not fail the command.
+- Derived data lifecycle states: `pending`, `stale`, `ready`, `error`.
+
