@@ -17,7 +17,7 @@ class DbCliTest(unittest.TestCase):
             config_path = Path(tmpdir) / "config.toml"
             db_path = Path(tmpdir) / "anchor.sqlite3"
             with patch("anchor.config.default_config_path", return_value=config_path):
-                with patch("anchor.adapters.sqlite_migration_repository.default_database_path", return_value=db_path):
+                with patch("anchor.container.default_database_path", return_value=db_path):
                     with patch("typer.echo") as echo_mock:
                         db_command("migrate")
 
@@ -25,7 +25,7 @@ class DbCliTest(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["command"], "db.migrate")
         self.assertEqual(payload["data"]["database_path"], str(db_path))
-        self.assertEqual(payload["data"]["current_version"], 1)
+        self.assertEqual(payload["data"]["current_version"], 3)
 
     def test_db_migrate_failure_emits_machine_error(self) -> None:
         container = patch("anchor.cli.build_container")

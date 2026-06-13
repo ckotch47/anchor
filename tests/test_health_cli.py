@@ -16,7 +16,7 @@ class HealthCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.toml"
             with patch("anchor.config.default_config_path", return_value=config_path):
-                with patch("anchor.adapters.sqlite_migration_repository.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
+                with patch("anchor.container.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
                     with patch("typer.echo") as echo_mock:
                         health()
 

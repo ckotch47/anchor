@@ -4,10 +4,15 @@ from dataclasses import dataclass
 
 from anchor.adapters.filesystem_config_repository import FileSystemConfigRepository
 from anchor.adapters.sqlite_migration_repository import SqliteMigrationRepository
+from anchor.adapters.sqlite_notes_repository import SqliteNotesRepository
 from anchor.application.config_service import ConfigService
+from anchor.application.document_chunking import DocumentChunkingService
+from anchor.application.embedding_provider_service import OpenAICompatibleEmbeddingsProvider
+from anchor.application.embedding_service import EmbeddingService
 from anchor.application.health_service import HealthService
 from anchor.application.migration_service import MigrationService
-from anchor.config import AppConfig
+from anchor.application.notes_service import NotesService
+from anchor.config import AppConfig, default_database_path
 
 
 @dataclass(frozen=True)
@@ -18,6 +23,7 @@ class Container:
     health_service: HealthService
     config_service: ConfigService
     migration_service: MigrationService
+    notes_service: NotesService
 
 
 def build_container(profile: str | None = None, auto_migrate: bool = True) -> Container:
@@ -25,7 +31,23 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
     config, config_path, profile_name = repo.load(profile=profile)
     health_service = HealthService(config=config)
     config_service = ConfigService(repository=repo)
-    migration_service = MigrationService(repository=SqliteMigrationRepository())
+    database_path = default_database_path()
+    migration_service = MigrationService(repository=SqliteMigrationRepository(database_path=database_path))
+    embedding_service = None
+    if not config.runtime.offline_only:
+        embeddings_provider = OpenAICompatibleEmbeddingsProvider(
+            base_url=config.provider.base_url,
+            api_key_env=config.provider.api_key_env,
+        )
+        embedding_service = EmbeddingService(
+            provider=embeddings_provider,
+            model=config.provider.embedding_model,
+        )
+    notes_service = NotesService(
+        repository=SqliteNotesRepository(database_path=database_path),
+        chunking_service=DocumentChunkingService(),
+        embedding_service=embedding_service,
+    )
     if auto_migrate:
         migration_service.migrate()
     return Container(
@@ -35,4 +57,5 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         health_service=health_service,
         config_service=config_service,
         migration_service=migration_service,
+        notes_service=notes_service,
     )

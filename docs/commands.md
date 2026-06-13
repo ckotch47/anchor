@@ -124,6 +124,55 @@ Example:
 anchor db migrate
 ```
 
+### `anchor notes add`
+
+- Creates a note in the shared SQLite core.
+- Requires `--title` and `--body`.
+- Stores the note through the shared document spine, not a separate memory database.
+
+Example:
+
+```bash
+anchor notes add --title "RAG plan" --body "Use SQLite FTS + vector + rerank"
+```
+
+### `anchor notes list`
+
+- Returns the newest notes first.
+- Use `--limit` to narrow the response.
+
+Example:
+
+```bash
+anchor notes list --limit 5
+```
+
+### `anchor notes get`
+
+- Returns one note by its document id.
+- Use `--id` with the value returned by `notes add` or `notes list`.
+
+Example:
+
+```bash
+anchor notes get --id note_123
+```
+
+### `anchor notes search`
+
+- Searches note titles and bodies through the shared SQLite retrieval layer.
+- Uses FTS over materialized retrieval chunks.
+- Chunking stays a separate preprocessing step before retrieval and rerank.
+- Search text is normalized before `MATCH`, so special FTS characters are treated as query text, not syntax.
+- Search is filtered to the note domain before ranking.
+- Start with `--limit` only when you need to trim the response.
+
+Example:
+
+```bash
+anchor notes search --query "rag plan" --limit 5
+```
+
 ## Target command set
 
 - `anchor memory capture`
@@ -149,7 +198,8 @@ anchor db migrate
 ## Future command pattern
 
 - `memory` is the unified retrieval surface over notes/tasks/history, not a separate source of truth.
-- `notes`, `history`, and `tasks` reuse the same retrieval-ready SQLite core.
+- `notes` already reuses the shared retrieval-ready SQLite core.
+- `history` and `tasks` will reuse the same core when their slices land.
 - Each domain owns its table(s), while search uses shared document spine + derived retrieval tables.
 - Semantic vector retrieval and rerank are first-class layers on top of that core, not a separate database.
 

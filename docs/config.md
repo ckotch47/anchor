@@ -50,4 +50,5 @@ limit = 50
 - explicit overrides from CLI flags win over config;
 - config should carry provider URL, model names, and vector settings;
 - provider URL may point to a local OpenAI-compatible endpoint;
+- when `runtime.offline_only = true`, generation layers should stay inactive and retrieval should degrade to non-generative paths;
 - profiles are optional and live in the same file.

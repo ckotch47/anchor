@@ -14,7 +14,7 @@
 
 ## Phase 2: Domain surfaces
 
-- implement `notes`, `tasks`, `history`
+- implement `notes` as the first domain slice, then `tasks` and `history`
 - add domain-specific tables for each context
 - add create/list/search/show/update flows
 - add link support between documents
@@ -23,10 +23,12 @@
 ## Phase 3: Retrieval engine
 
 - add FTS search
-- add chunking for long content
-- add embeddings generation
+- add explicit chunking/materialization pipeline for documents
+- add query normalization before FTS `MATCH`
+- add embeddings generation on chunks through an OpenAI-compatible provider
 - add vector retrieval with `sqlite-vector`
-- add rerank for top-k
+- add explicit score fusion strategy for lexical + vector candidates
+- add rerank for top-k chunk candidates
 - add compact projection commands to avoid full-context responses
 
 ## Phase 4: Operations and resilience

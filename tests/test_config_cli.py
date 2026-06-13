@@ -16,7 +16,7 @@ class ConfigCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.toml"
             with patch("anchor.config.default_config_path", return_value=config_path):
-                with patch("anchor.adapters.sqlite_migration_repository.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
+                with patch("anchor.container.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
                     with patch("typer.echo") as echo_mock:
                         config_command("get")
 
@@ -29,7 +29,7 @@ class ConfigCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.toml"
             with patch("anchor.config.default_config_path", return_value=config_path):
-                with patch("anchor.adapters.sqlite_migration_repository.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
+                with patch("anchor.container.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
                     with patch("typer.echo"):
                         config_command("set", section="runtime", key="default_view", value="full")
                     with patch("typer.echo") as echo_mock:
@@ -42,7 +42,7 @@ class ConfigCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.toml"
             with patch("anchor.config.default_config_path", return_value=config_path):
-                with patch("anchor.adapters.sqlite_migration_repository.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
+                with patch("anchor.container.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
                     with patch("typer.echo"):
                         config_command("set", section="runtime", key="offline_only", value="false")
                     with patch("typer.echo") as echo_mock:
@@ -55,7 +55,7 @@ class ConfigCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.toml"
             with patch("anchor.config.default_config_path", return_value=config_path):
-                with patch("anchor.adapters.sqlite_migration_repository.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
+                with patch("anchor.container.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
                     with patch("typer.echo") as echo_mock:
                         with self.assertRaises(Exit):
                             config_command("set", section="bad", key="default_view", value="full")

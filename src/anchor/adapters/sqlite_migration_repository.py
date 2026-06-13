@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
+from anchor.adapters.sqlite_support import configure_connection, utc_now_iso
 from anchor.config import default_database_path
 
 
@@ -159,6 +159,45 @@ CREATE INDEX IF NOT EXISTS idx_schema_migrations_version ON schema_migrations(ve
 CREATE INDEX IF NOT EXISTS idx_index_states_state_type ON index_states(state, index_type);
 """.strip(),
     ),
+    Migration(
+        version=2,
+        name="0002_document_chunks_fts",
+        sql="""
+CREATE VIRTUAL TABLE IF NOT EXISTS document_chunks_fts USING fts5(
+    document_type UNINDEXED,
+    document_id UNINDEXED,
+    chunk_id UNINDEXED,
+    title,
+    chunk_text
+);
+""".strip(),
+    ),
+    Migration(
+        version=3,
+        name="0003_rebuild_document_chunks_fts_with_document_type",
+        sql="""
+DROP TABLE IF EXISTS document_chunks_fts;
+
+CREATE VIRTUAL TABLE document_chunks_fts USING fts5(
+    document_type UNINDEXED,
+    document_id UNINDEXED,
+    chunk_id UNINDEXED,
+    title,
+    chunk_text
+);
+
+INSERT INTO document_chunks_fts (document_type, document_id, chunk_id, title, chunk_text)
+SELECT
+    d.document_type,
+    c.document_id,
+    c.id,
+    d.title,
+    c.chunk_text
+FROM document_chunks AS c
+JOIN documents AS d ON d.id = c.document_id
+WHERE d.deleted_at IS NULL;
+""".strip(),
+    ),
 ]
 
 
@@ -195,9 +234,7 @@ class SqliteMigrationRepository:
             connection.close()
 
     def _configure(self, connection: sqlite3.Connection) -> None:
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = WAL")
-        connection.execute("PRAGMA busy_timeout = 250")
+        configure_connection(connection, busy_timeout_ms=250)
 
     def _ensure_migrations_table(self, connection: sqlite3.Connection) -> None:
         connection.execute(
@@ -226,7 +263,7 @@ class SqliteMigrationRepository:
                 migration.version,
                 migration.name,
                 migration.checksum,
-                datetime.now(UTC).isoformat(),
+                utc_now_iso(),
                 "applied",
             ),
         )

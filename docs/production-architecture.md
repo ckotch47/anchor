@@ -73,10 +73,12 @@ Retrieval is hybrid and should exist from the first production slice.
 
 1. Lexical candidate generation
    - FTS over canonical text and/or chunks
+   - user query is normalized before `MATCH`
+   - search is filtered by document type before ranking
 2. Vector candidate generation
    - `sqlite-vector` backed similarity search
 3. Score fusion
-   - merge lexical and vector candidates
+   - explicit lexical/vector weighting, with lexical-only fallback when vector data is unavailable
 4. Rerank
    - local rerank model through an OpenAI-compatible provider interface
 5. Compact response

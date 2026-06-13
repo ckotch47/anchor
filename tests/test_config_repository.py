@@ -57,9 +57,13 @@ class ConfigRepositoryTest(unittest.TestCase):
                     for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
                 }
                 version_rows = connection.execute("SELECT version FROM schema_migrations").fetchall()
+                fts_columns = {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(document_chunks_fts)").fetchall()
+                }
 
-        self.assertEqual(result.applied, 1)
-        self.assertEqual(result.current_version, 1)
+        self.assertEqual(result.applied, 3)
+        self.assertEqual(result.current_version, 3)
         self.assertIn("schema_migrations", tables)
         self.assertIn("documents", tables)
         self.assertIn("notes", tables)
@@ -67,10 +71,12 @@ class ConfigRepositoryTest(unittest.TestCase):
         self.assertIn("history_entries", tables)
         self.assertIn("document_chunks", tables)
         self.assertIn("chunk_embeddings", tables)
+        self.assertIn("document_chunks_fts", tables)
         self.assertIn("document_tags", tables)
         self.assertIn("document_links", tables)
         self.assertIn("events", tables)
         self.assertIn("settings", tables)
         self.assertIn("index_states", tables)
         self.assertNotIn("items", tables)
-        self.assertEqual(version_rows, [(1,)])
+        self.assertIn("document_type", fts_columns)
+        self.assertEqual(version_rows, [(1,), (2,), (3,)])
