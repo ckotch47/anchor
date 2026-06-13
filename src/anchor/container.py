@@ -65,6 +65,7 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
     tasks_service = TasksService(
         repository=SqliteTasksRepository(database_path=database_path),
         project=config.runtime.default_project,
+        budget_tokens=config.runtime.default_budget_tokens,
     )
     if auto_migrate:
         migration_service.migrate()

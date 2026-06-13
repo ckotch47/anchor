@@ -15,6 +15,8 @@ from anchor.application.retrieval.search_scoring import combine_search_scores, c
 
 
 class SqliteNotesRepository(SqliteRepositoryBase):
+    EMBEDDING_INDEX_TYPE = "note_embeddings"
+
     def __init__(self, database_path: Path | None = None) -> None:
         super().__init__(database_path=database_path)
 
@@ -60,10 +62,11 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                 created_at=now,
             )
             connection.commit()
-            note = self.get(note_id, project=project)
-            if note is None:
-                raise RuntimeError("created note could not be reloaded")
-            return note
+        self.enqueue_embedding_index(note_id)
+        note = self.get(note_id, project=project)
+        if note is None:
+            raise RuntimeError("created note could not be reloaded")
+        return note
 
     def update(
         self,
@@ -151,10 +154,11 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                     created_at=now,
                 )
             connection.commit()
-            updated = self.get(note_id, project=project)
-            if updated is None:
-                raise RuntimeError("updated note could not be reloaded")
-            return updated
+        self.enqueue_embedding_index(note_id)
+        updated = self.get(note_id, project=project)
+        if updated is None:
+            raise RuntimeError("updated note could not be reloaded")
+        return updated
 
     def list(self, limit: int, *, project: str) -> list[NoteRecord]:
         with self._connect() as connection:
@@ -247,6 +251,82 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                         created_at,
                     ),
                 )
+            connection.commit()
+
+    def enqueue_embedding_index(self, document_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO index_states (
+                    entity_type, entity_id, index_type, state, indexed_at, stale_since, last_error
+                )
+                VALUES (?, ?, ?, 'pending', NULL, ?, NULL)
+                ON CONFLICT(entity_type, entity_id, index_type)
+                DO UPDATE SET
+                    state = 'pending',
+                    stale_since = excluded.stale_since,
+                    last_error = NULL
+                """,
+                ("document", document_id, self.EMBEDDING_INDEX_TYPE, utc_now_iso()),
+            )
+            connection.commit()
+
+    def pending_embedding_documents(self, *, project: str, limit: int = 8) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT entity_id
+                FROM index_states
+                WHERE entity_type = 'document'
+                  AND index_type = ?
+                  AND state IN ('pending', 'stale')
+                  AND entity_id IN (
+                      SELECT id
+                      FROM documents
+                      WHERE project = ? AND deleted_at IS NULL AND document_type = 'note'
+                  )
+                ORDER BY COALESCE(stale_since, indexed_at) ASC, entity_id ASC
+                LIMIT ?
+                """,
+                (self.EMBEDDING_INDEX_TYPE, project, limit),
+            ).fetchall()
+            return [str(row["entity_id"]) for row in rows]
+
+    def mark_embedding_index_ready(self, document_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO index_states (
+                    entity_type, entity_id, index_type, state, indexed_at, stale_since, last_error
+                )
+                VALUES (?, ?, ?, 'ready', ?, NULL, NULL)
+                ON CONFLICT(entity_type, entity_id, index_type)
+                DO UPDATE SET
+                    state = 'ready',
+                    indexed_at = excluded.indexed_at,
+                    stale_since = NULL,
+                    last_error = NULL
+                """,
+                ("document", document_id, self.EMBEDDING_INDEX_TYPE, utc_now_iso()),
+            )
+            connection.commit()
+
+    def mark_embedding_index_error(self, document_id: str, *, last_error: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO index_states (
+                    entity_type, entity_id, index_type, state, indexed_at, stale_since, last_error
+                )
+                VALUES (?, ?, ?, 'error', NULL, ?, ?)
+                ON CONFLICT(entity_type, entity_id, index_type)
+                DO UPDATE SET
+                    state = 'error',
+                    stale_since = excluded.stale_since,
+                    last_error = excluded.last_error
+                """,
+                ("document", document_id, self.EMBEDDING_INDEX_TYPE, utc_now_iso(), last_error),
+            )
             connection.commit()
 
     def search(self, query: str, limit: int, *, project: str) -> list[NotesSearchHit]:

@@ -17,8 +17,8 @@ class DocumentChunkingService:
         body = body.strip()
         if not body:
             return []
-        return [DocumentChunkDraft(chunk_index=0, chunk_text=body, token_count=self._token_count(body))]
+        return [DocumentChunkDraft(chunk_index=0, chunk_text=body, token_count=count_tokens(body))]
 
-    @staticmethod
-    def _token_count(text: str) -> int:
-        return len(re.findall(r"[^\W_]+(?:[-'][^\W_]+)*", text, flags=re.UNICODE))
+
+def count_tokens(text: str) -> int:
+    return len(re.findall(r"[^\W_]+(?:[-'][^\W_]+)*", text, flags=re.UNICODE))

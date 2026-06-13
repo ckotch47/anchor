@@ -13,7 +13,7 @@ from anchor.application.notes.models import (
     NotesSearchHit,
     NotesSearchResult,
 )
-from anchor.application.retrieval.document_chunking import DocumentChunkingService
+from anchor.application.retrieval.document_chunking import DocumentChunkingService, count_tokens
 from anchor.application.retrieval.rerank_service import RerankService
 from anchor.application.retrieval.search_scoring import combine_search_scores
 
@@ -60,7 +60,7 @@ class NotesService:
             metatags=metatags or {},
             chunks=chunks,
         )
-        self._materialize_embeddings(result.id)
+        self._queue_embeddings(result.id)
         return result
 
     def update(
@@ -103,7 +103,7 @@ class NotesService:
         if result is None:
             raise LookupError(f"note not found: {note_id}")
         if chunks is not None:
-            self._materialize_embeddings(result.id)
+            self._queue_embeddings(result.id)
         return result
 
     def list(self, limit: int = 20, *, project: str | None = None) -> NotesListResult:
@@ -116,15 +116,9 @@ class NotesService:
                 NoteListItem(
                     id=note.id,
                     project=note.project,
-                    metatags=note.metatags,
                     title=note.title,
-                    source=note.source,
-                    source_ref=note.source_ref,
-                    note_kind=note.note_kind,
                     pinned=note.pinned,
-                    archived_at=note.archived_at,
                     created_at=note.created_at,
-                    updated_at=note.updated_at,
                 )
                 for note in notes
             ],
@@ -149,6 +143,7 @@ class NotesService:
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
         resolved_project = project or self._project
+        self._drain_pending_embeddings(resolved_project)
         candidate_limit = max(limit * 4, limit)
         candidates = self._collect_candidates(query, candidate_limit, resolved_project)
         reranked_candidates = self._rerank_candidates(query, candidates)
@@ -177,25 +172,43 @@ class NotesService:
         if not value.strip():
             raise ValueError(f"{field} must not be empty")
 
-    def _materialize_embeddings(self, document_id: str) -> None:
-        if self._embedding_service is None:
-            return
-        chunks = self._repository.list_chunks(document_id)
-        if not chunks:
+    def _queue_embeddings(self, document_id: str) -> None:
+        if self._embedding_service is None or not hasattr(self._repository, "enqueue_embedding_index"):
             return
         try:
-            result = self._embedding_service.embed_chunks(
-                [chunk.id for chunk in chunks],
-                [chunk.chunk_text for chunk in chunks],
-            )
-            self._repository.store_chunk_embeddings(
-                result.embeddings,
-                project=chunks[0].project,
-                metatags=self._serialize_metatags(chunks[0].metatags),
-                created_at=chunks[0].created_at,
-            )
+            self._repository.enqueue_embedding_index(document_id)
         except Exception:
             return
+
+    def _drain_pending_embeddings(self, project: str) -> None:
+        if self._embedding_service is None or not hasattr(self._repository, "pending_embedding_documents"):
+            return
+        try:
+            pending_documents = self._repository.pending_embedding_documents(project=project)
+        except Exception:
+            return
+        for document_id in pending_documents:
+            try:
+                chunks = self._repository.list_chunks(document_id)
+                if not chunks:
+                    if hasattr(self._repository, "mark_embedding_index_ready"):
+                        self._repository.mark_embedding_index_ready(document_id)
+                    continue
+                result = self._embedding_service.embed_chunks(
+                    [chunk.id for chunk in chunks],
+                    [chunk.chunk_text for chunk in chunks],
+                )
+                self._repository.store_chunk_embeddings(
+                    result.embeddings,
+                    project=chunks[0].project,
+                    metatags=self._serialize_metatags(chunks[0].metatags),
+                    created_at=chunks[0].created_at,
+                )
+                if hasattr(self._repository, "mark_embedding_index_ready"):
+                    self._repository.mark_embedding_index_ready(document_id)
+            except Exception as exc:
+                if hasattr(self._repository, "mark_embedding_index_error"):
+                    self._repository.mark_embedding_index_error(document_id, last_error=str(exc))
 
     @staticmethod
     def _serialize_metatags(metatags: dict[str, object]) -> str:
@@ -279,7 +292,7 @@ class NotesService:
         return trimmed
 
     def _estimate_candidate_tokens(self, candidate: NotesSearchCandidate) -> int:
-        return max(1, candidate.token_count + len(candidate.note.title.split()) + len(candidate.snippet.split()))
+        return max(1, candidate.token_count + count_tokens(candidate.note.title) + count_tokens(candidate.snippet))
 
     @staticmethod
     def _candidate_text(candidate: NotesSearchCandidate) -> str:
@@ -294,7 +307,7 @@ class NotesService:
                 note=result.note,
                 chunk_id=result.chunk_id,
                 snippet=result.snippet,
-                token_count=len(result.snippet.split()),
+                token_count=count_tokens(result.snippet),
                 lexical_score=result.score,
             )
             for result in results

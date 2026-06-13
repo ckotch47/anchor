@@ -23,15 +23,9 @@ class NoteRecord(BaseModel):
 class NoteListItem(BaseModel):
     id: str
     project: str
-    metatags: dict[str, Any]
     title: str
-    source: str
-    source_ref: str
-    note_kind: str
     pinned: bool
-    archived_at: str | None
     created_at: str
-    updated_at: str
 
 
 class NotesSearchHit(BaseModel):

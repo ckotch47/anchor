@@ -15,6 +15,7 @@ class FakeNotesRepository:
         self.created: NoteRecord | None = None
         self._chunks = []
         self.stored_embeddings: list[ChunkEmbeddingRecord] = []
+        self.pending_embedding_ids: list[str] = []
 
     def create(
         self,
@@ -110,6 +111,23 @@ class FakeNotesRepository:
     def store_chunk_embeddings(self, embeddings, *, project: str, metatags: str, created_at: str):
         self.stored_embeddings.extend(embeddings)
 
+    def enqueue_embedding_index(self, document_id: str):
+        if document_id not in self.pending_embedding_ids:
+            self.pending_embedding_ids.append(document_id)
+
+    def pending_embedding_documents(self, *, project: str, limit: int = 8):
+        del project
+        return self.pending_embedding_ids[:limit]
+
+    def mark_embedding_index_ready(self, document_id: str):
+        if document_id in self.pending_embedding_ids:
+            self.pending_embedding_ids.remove(document_id)
+
+    def mark_embedding_index_error(self, document_id: str, *, last_error: str):
+        del last_error
+        if document_id in self.pending_embedding_ids:
+            self.pending_embedding_ids.remove(document_id)
+
     def search(self, query: str, limit: int, *, project: str):  # pragma: no cover - not used in test
         return []
 
@@ -196,7 +214,7 @@ class SearchPipelineRepository(FakeNotesRepository):
 
 
 class NotesServiceTest(unittest.TestCase):
-    def test_add_materializes_embeddings(self) -> None:
+    def test_add_queues_embeddings(self) -> None:
         repo = FakeNotesRepository()
         service = NotesService(
             repository=repo,
@@ -208,12 +226,10 @@ class NotesServiceTest(unittest.TestCase):
         note = service.add(title="Hello", body="one two three", source="cli")
 
         self.assertEqual(note.id, "note_1")
-        self.assertEqual(len(repo.stored_embeddings), 1)
-        self.assertEqual(repo.stored_embeddings[0].chunk_id, "chunk_1")
-        self.assertEqual(repo.stored_embeddings[0].model, "test-embed")
-        self.assertEqual(repo.stored_embeddings[0].embedding, [13.0])
+        self.assertEqual(repo.pending_embedding_ids, ["note_1"])
+        self.assertEqual(len(repo.stored_embeddings), 0)
 
-    def test_update_rebuilds_chunks_and_embeddings(self) -> None:
+    def test_update_requeues_embeddings(self) -> None:
         repo = FakeNotesRepository()
         service = NotesService(
             repository=repo,
@@ -227,8 +243,29 @@ class NotesServiceTest(unittest.TestCase):
 
         self.assertEqual(updated.title, "Hello again")
         self.assertEqual(updated.body, "four five six")
-        self.assertEqual(len(repo.stored_embeddings), 2)
-        self.assertEqual(repo.stored_embeddings[-1].chunk_id, "chunk_1")
+        self.assertEqual(repo.pending_embedding_ids, ["note_1"])
+        self.assertEqual(len(repo.stored_embeddings), 0)
+
+    def test_search_drains_pending_embeddings(self) -> None:
+        repo = SearchPipelineRepository()
+        service = NotesService(
+            repository=repo,
+            chunking_service=DocumentChunkingService(),
+            project="workspace",
+            embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="embed"),
+            rerank_service=RerankService(
+                embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="rerank")
+            ),
+            budget_tokens=100,
+        )
+
+        service.add(title="Hello", body="alpha body content", source="cli", project="repo-a")
+        self.assertEqual(len(repo.stored_embeddings), 0)
+
+        result = service.search("alpha", limit=4, project="repo-a")
+
+        self.assertEqual(result.count, 2)
+        self.assertGreaterEqual(len(repo.stored_embeddings), 1)
 
     def test_update_rejects_empty_payload(self) -> None:
         repo = FakeNotesRepository()
@@ -278,6 +315,12 @@ class NotesServiceTest(unittest.TestCase):
 
         self.assertEqual(result.count, 1)
         self.assertEqual(result.results[0].note.id, "note_1")
+
+    def test_token_count_handles_punctuation_and_cjk(self) -> None:
+        from anchor.application.retrieval.document_chunking import count_tokens
+
+        self.assertEqual(count_tokens("FTS * (search)"), 2)
+        self.assertGreaterEqual(count_tokens("русский текст и code_snippet()"), 3)
 
     def test_search_falls_back_when_embeddings_are_unavailable(self) -> None:
         repo = SearchPipelineRepository()

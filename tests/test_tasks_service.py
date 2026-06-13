@@ -120,6 +120,25 @@ class FakeTasksRepository:
         ][:limit]
 
 
+class BudgetedTasksRepository(FakeTasksRepository):
+    def search(self, query: str, limit: int, *, project: str):
+        del query, project
+        return [
+            TaskSearchHit(
+                task=TaskListItem(id="task_1", title="Task one", status="open", priority=0),
+                chunk_id="chunk_1",
+                score=0.9,
+                snippet="Task one snippet with extra words",
+            ),
+            TaskSearchHit(
+                task=TaskListItem(id="task_2", title="Task two", status="open", priority=0),
+                chunk_id="chunk_2",
+                score=0.8,
+                snippet="Task two snippet with extra words",
+            ),
+        ][:limit]
+
+
 class TasksServiceTest(unittest.TestCase):
     def test_add_list_and_done_flow(self) -> None:
         repo = FakeTasksRepository()
@@ -158,6 +177,15 @@ class TasksServiceTest(unittest.TestCase):
         self.assertEqual(result.query, "deploy")
         self.assertEqual(result.count, 1)
         self.assertEqual(result.results[0].task.title, "Task one")
+
+    def test_search_trims_to_budget(self) -> None:
+        repo = BudgetedTasksRepository()
+        service = TasksService(repository=repo, project="workspace", budget_tokens=8)
+
+        result = service.search("deploy", project="repo-a")
+
+        self.assertEqual(result.count, 1)
+        self.assertEqual(result.results[0].task.id, "task_1")
 
     def test_update_changes_fields(self) -> None:
         repo = FakeTasksRepository()

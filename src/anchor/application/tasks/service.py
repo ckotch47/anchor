@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from anchor.adapters.sqlite_tasks_repository import SqliteTasksRepository
-from anchor.application.tasks.models import TaskListItem, TaskRecord, TasksListResult, TasksSearchResult
+from anchor.application.retrieval.document_chunking import count_tokens
+from anchor.application.tasks.models import TaskListItem, TaskRecord, TaskSearchHit, TasksListResult, TasksSearchResult
 
 
 class TasksService:
@@ -9,9 +10,11 @@ class TasksService:
         self,
         repository: SqliteTasksRepository,
         project: str,
+        budget_tokens: int = 800,
     ) -> None:
         self._repository = repository
         self._project = project
+        self._budget_tokens = budget_tokens
 
     def add(
         self,
@@ -122,7 +125,10 @@ class TasksService:
         self._require_non_empty(query, "query")
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
-        results = self._repository.search(query=query, limit=limit, project=project or self._project)
+        results = self._trim_to_budget(
+            self._repository.search(query=query, limit=limit, project=project or self._project),
+            self._budget_tokens,
+        )
         return TasksSearchResult(query=query, count=len(results), results=results)
 
     def done(self, task_id: str, *, project: str | None = None) -> TaskRecord:
@@ -136,3 +142,20 @@ class TasksService:
     def _require_non_empty(value: str, field: str) -> None:
         if not value.strip():
             raise ValueError(f"{field} must not be empty")
+
+    @staticmethod
+    def _estimate_result_tokens(result: TaskSearchHit) -> int:
+        return max(1, count_tokens(result.task.title) + count_tokens(result.snippet))
+
+    def _trim_to_budget(self, results: list[TaskSearchHit], budget_tokens: int) -> list[TaskSearchHit]:
+        if budget_tokens <= 0:
+            return []
+        trimmed: list[TaskSearchHit] = []
+        total_tokens = 0
+        for result in results:
+            result_cost = self._estimate_result_tokens(result)
+            if trimmed and total_tokens + result_cost > budget_tokens:
+                break
+            trimmed.append(result)
+            total_tokens += result_cost
+        return trimmed
