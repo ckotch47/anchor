@@ -22,7 +22,7 @@
 
 ## Negative request contract
 
-- Future write commands such as `notes add` and `tasks add` must reject empty payloads with `INVALID_ARGS`.
+- Future write and update commands such as `notes add`, `notes update`, `tasks add`, and `tasks update` must reject empty payloads with `INVALID_ARGS`.
 - Future search commands must reject invalid `--limit` values with `INVALID_ARGS` instead of silently clamping.
 - If a command requires generation and the provider is unavailable, it must emit `OFFLINE_ONLY` or `PROVIDER_OFFLINE` with a stable JSON error envelope.
 
@@ -75,8 +75,10 @@
 
 - `anchor config get [--profile <name>]`
 - `anchor config set --section <runtime|provider|vector|profiles> --key <field> --value <raw> [--profile <name>]`
+- `anchor config init [--force]`
 - `config get` returns the full effective config plus the resolved config path.
 - `config set` writes the updated config back to the user-folder TOML file.
+- `config init` bootstraps the user config from `config.example.toml`.
 
 ## Current commands
 
@@ -128,34 +130,53 @@ anchor db migrate
 
 - Creates a note in the shared SQLite core.
 - Requires `--title` and `--body`.
+- Accepts `--project` to scope the note explicitly and `--metatags` as a JSON object string.
 - Stores the note through the shared document spine, not a separate memory database.
 
 Example:
 
 ```bash
-anchor notes add --title "RAG plan" --body "Use SQLite FTS + vector + rerank"
+anchor notes add --title "RAG plan" --body "Use SQLite FTS + vector + rerank" --project repo-a --metatags '{"topic":"rag"}'
+```
+
+### `anchor notes update`
+
+- Partially updates a note in the shared SQLite core.
+- Use `--id` with the note id returned by `notes add` or `notes list`.
+- Accepts optional `--title`, `--body`, `--source`, `--source-ref`, `--pinned/--no-pinned`, `--project`, and `--metatags`.
+- Leaves unspecified fields unchanged.
+- Uses the selected project only as the lookup scope.
+
+Example:
+
+```bash
+anchor notes update --id note_123 --title "RAG plan v2" --project repo-a
 ```
 
 ### `anchor notes list`
 
 - Returns the newest notes first.
+- Emits a compact navigation record per note, not the full body text.
+- The target contract is project-scoped, so list/search should stay inside the selected project boundary.
+- Use `--project` to override the default project scope from config.
 - Use `--limit` to narrow the response.
 
 Example:
 
 ```bash
-anchor notes list --limit 5
+anchor notes list --limit 5 --project repo-a
 ```
 
 ### `anchor notes get`
 
 - Returns one note by its document id.
 - Use `--id` with the value returned by `notes add` or `notes list`.
+- Use `--project` to fetch from a non-default project scope.
 
 Example:
 
 ```bash
-anchor notes get --id note_123
+anchor notes get --id note_123 --project repo-a
 ```
 
 ### `anchor notes search`
@@ -163,14 +184,88 @@ anchor notes get --id note_123
 - Searches note titles and bodies through the shared SQLite retrieval layer.
 - Uses FTS over materialized retrieval chunks.
 - Chunking stays a separate preprocessing step before retrieval and rerank.
+- The search pipeline is lexical candidate generation, vector candidate generation, rerank, dedup by note, and budget trim.
+- The final response is capped by the configured token budget so agents get a compact result set.
+- If embeddings or rerank are unavailable, search degrades to lexical-only instead of failing.
 - Search text is normalized before `MATCH`, so special FTS characters are treated as query text, not syntax.
+- The target contract is project-scoped and can further filter by metatags before ranking.
 - Search is filtered to the note domain before ranking.
+- Use `--project` to search a specific repository or workspace.
 - Start with `--limit` only when you need to trim the response.
 
 Example:
 
 ```bash
-anchor notes search --query "rag plan" --limit 5
+anchor notes search --query "rag plan" --limit 5 --project repo-a
+```
+
+### `anchor tasks add`
+
+- Creates a task in the shared SQLite core.
+- Requires `--title`.
+- Accepts `--body`, `--priority`, `--due-at`, `--task-kind`, `--project`, `--metatags`, `--parent-id`, and `--blocked-by-id`.
+- Stores the task through the shared document spine, not a separate tracker database.
+
+Example:
+
+```bash
+anchor tasks add --title "Ship tasks slice" --body "Implement tasks commands" --priority 2 --project repo-a --metatags '{"topic":"tasks"}'
+```
+
+### `anchor tasks search`
+
+- Searches task titles and task bodies through the shared SQLite retrieval layer.
+- Uses FTS over materialized task chunks.
+- The search pipeline is lexical candidate generation plus compact hits with snippets.
+- Existing tasks without chunks are backfilled on demand before search so legacy rows stay searchable.
+- Search text is normalized before `MATCH`, so special FTS characters are treated as query text, not syntax.
+- The target contract is project-scoped and filtered to the task domain before ranking.
+- If a provider is unavailable, task search stays lexical-only.
+
+Example:
+
+```bash
+anchor tasks search --query "deploy" --limit 5 --project repo-a
+```
+
+### `anchor tasks update`
+
+- Partially updates a task in the shared SQLite core.
+- Use `--id` with the task id returned by `tasks add` or `tasks list`.
+- Accepts optional `--title`, `--body`, `--source`, `--source-ref`, `--priority`, `--due-at`, `--task-kind`, `--parent-id`, `--blocked-by-id`, `--project`, and `--metatags`.
+- Leaves unspecified fields unchanged.
+- Uses the selected project only as the lookup scope.
+
+Example:
+
+```bash
+anchor tasks update --id task_123 --priority 5 --project repo-a
+```
+
+### `anchor tasks list`
+
+- Returns the newest tasks first.
+- Emits a compact navigation record per task with `id`, `title`, `status`, and `priority`.
+- The target contract is project-scoped, so list/search should stay inside the selected project boundary.
+- Use `--project` to override the default project scope from config.
+- Use `--limit` to narrow the response.
+
+Example:
+
+```bash
+anchor tasks list --limit 5 --project repo-a
+```
+
+### `anchor tasks done`
+
+- Marks a task as completed.
+- Use `--id` with the value returned by `tasks add` or `tasks list`.
+- Use `--project` to complete a task in a non-default project scope.
+
+Example:
+
+```bash
+anchor tasks done --id task_123 --project repo-a
 ```
 
 ## Target command set
@@ -179,8 +274,11 @@ anchor notes search --query "rag plan" --limit 5
 - `anchor memory search`
 - `anchor memory recall`
 - `anchor notes add`
+- `anchor notes update`
 - `anchor notes search`
 - `anchor tasks add`
+- `anchor tasks search`
+- `anchor tasks update`
 - `anchor tasks list`
 - `anchor tasks done`
 - `anchor history append`
@@ -201,6 +299,8 @@ anchor notes search --query "rag plan" --limit 5
 - `notes` already reuses the shared retrieval-ready SQLite core.
 - `history` and `tasks` will reuse the same core when their slices land.
 - Each domain owns its table(s), while search uses shared document spine + derived retrieval tables.
+- `project` and `metatags` are part of the target contract for all domain entities and should be respected by list/search commands.
+- Mutable domain entities should expose partial `update` commands with the same project-scoped contract.
 - Semantic vector retrieval and rerank are first-class layers on top of that core, not a separate database.
 
 ## Пример JSON ответа

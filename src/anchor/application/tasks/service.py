@@ -1,0 +1,138 @@
+from __future__ import annotations
+
+from anchor.adapters.sqlite_tasks_repository import SqliteTasksRepository
+from anchor.application.tasks.models import TaskListItem, TaskRecord, TasksListResult, TasksSearchResult
+
+
+class TasksService:
+    def __init__(
+        self,
+        repository: SqliteTasksRepository,
+        project: str,
+    ) -> None:
+        self._repository = repository
+        self._project = project
+
+    def add(
+        self,
+        *,
+        title: str,
+        body: str = "",
+        source: str = "cli",
+        source_ref: str = "",
+        project: str | None = None,
+        metatags: dict[str, object] | None = None,
+        task_kind: str = "task",
+        priority: int = 0,
+        due_at: str | None = None,
+        parent_document_id: str | None = None,
+        blocked_by_document_id: str | None = None,
+    ) -> TaskRecord:
+        self._require_non_empty(title, "title")
+        self._require_non_empty(task_kind, "task_kind")
+        result = self._repository.create(
+            title=title,
+            body=body,
+            source=source,
+            source_ref=source_ref,
+            project=project or self._project,
+            metatags=metatags or {},
+            task_kind=task_kind,
+            priority=priority,
+            due_at=due_at,
+            parent_document_id=parent_document_id,
+            blocked_by_document_id=blocked_by_document_id,
+        )
+        return result
+
+    def update(
+        self,
+        task_id: str,
+        *,
+        title: str | None = None,
+        body: str | None = None,
+        source: str | None = None,
+        source_ref: str | None = None,
+        project: str | None = None,
+        metatags: dict[str, object] | None = None,
+        task_kind: str | None = None,
+        priority: int | None = None,
+        due_at: str | None = None,
+        parent_document_id: str | None = None,
+        blocked_by_document_id: str | None = None,
+    ) -> TaskRecord:
+        self._require_non_empty(task_id, "id")
+        if title is not None:
+            self._require_non_empty(title, "title")
+        if task_kind is not None:
+            self._require_non_empty(task_kind, "task_kind")
+        if all(
+            value is None
+            for value in (
+                title,
+                body,
+                source,
+                source_ref,
+                metatags,
+                task_kind,
+                priority,
+                due_at,
+                parent_document_id,
+                blocked_by_document_id,
+            )
+        ):
+            raise ValueError("update requires at least one field")
+        resolved_project = project or self._project
+        result = self._repository.update(
+            task_id,
+            project=resolved_project,
+            title=title,
+            body=body,
+            source=source,
+            source_ref=source_ref,
+            metatags=metatags,
+            task_kind=task_kind,
+            priority=priority,
+            due_at=due_at,
+            parent_document_id=parent_document_id,
+            blocked_by_document_id=blocked_by_document_id,
+        )
+        if result is None:
+            raise LookupError(f"task not found: {task_id}")
+        return result
+
+    def list(self, limit: int = 20, *, project: str | None = None) -> TasksListResult:
+        if limit <= 0:
+            raise ValueError("limit must be greater than zero")
+        tasks = self._repository.list(limit, project=project or self._project)
+        return TasksListResult(
+            count=len(tasks),
+            tasks=[
+                TaskListItem(
+                    id=task.id,
+                    title=task.title,
+                    status=task.status,
+                    priority=task.priority,
+                )
+                for task in tasks
+            ],
+        )
+
+    def search(self, query: str, limit: int = 20, *, project: str | None = None) -> TasksSearchResult:
+        self._require_non_empty(query, "query")
+        if limit <= 0:
+            raise ValueError("limit must be greater than zero")
+        results = self._repository.search(query=query, limit=limit, project=project or self._project)
+        return TasksSearchResult(query=query, count=len(results), results=results)
+
+    def done(self, task_id: str, *, project: str | None = None) -> TaskRecord:
+        self._require_non_empty(task_id, "id")
+        task = self._repository.complete(task_id, project=project or self._project)
+        if task is None:
+            raise LookupError(f"task not found: {task_id}")
+        return task
+
+    @staticmethod
+    def _require_non_empty(value: str, field: str) -> None:
+        if not value.strip():
+            raise ValueError(f"{field} must not be empty")

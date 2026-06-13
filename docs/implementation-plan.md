@@ -4,6 +4,7 @@
 
 - create CLI entrypoint
 - add config loader
+- split system services into `application/system`
 - add SQLite schema and migrations
 - add JSON output contract
 - add output budget rules for agent-facing commands
@@ -16,6 +17,8 @@
 
 - implement `notes` as the first domain slice, then `tasks` and `history`
 - add domain-specific tables for each context
+- add shared `project` and `metatags` columns to every domain entity so all commands can scope and filter locally
+- add direct task-link fields for nesting and blocking, while keeping `document_links` as the general graph
 - add create/list/search/show/update flows
 - add link support between documents
 - add events/audit trail
@@ -25,10 +28,13 @@
 - add FTS search
 - add explicit chunking/materialization pipeline for documents
 - add query normalization before FTS `MATCH`
+- add project-scoped retrieval and metatag filtering before ranking
 - add embeddings generation on chunks through an OpenAI-compatible provider
 - add vector retrieval with `sqlite-vector`
 - add explicit score fusion strategy for lexical + vector candidates
 - add rerank for top-k chunk candidates
+- add dedup by document before returning results
+- add budget trim before response emission
 - add compact projection commands to avoid full-context responses
 
 ## Phase 4: Operations and resilience

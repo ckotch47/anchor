@@ -24,6 +24,7 @@ class ConfigCliTest(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["command"], "config.get")
         self.assertEqual(payload["data"]["config_path"], str(config_path))
+        self.assertEqual(payload["data"]["config"]["runtime"]["default_project"], "workspace")
 
     def test_config_set_updates_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -63,3 +64,31 @@ class ConfigCliTest(unittest.TestCase):
         payload = json.loads(echo_mock.call_args.args[0])
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error"]["code"], "INVALID_ARGS")
+
+    def test_config_init_creates_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
+                    with patch("typer.echo") as echo_mock:
+                        config_command("init")
+
+                    payload = json.loads(echo_mock.call_args.args[0])
+                    self.assertTrue(payload["ok"])
+                    self.assertEqual(payload["command"], "config.init")
+                    self.assertTrue(config_path.exists())
+
+    def test_config_init_rejects_existing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
+                    with patch("typer.echo"):
+                        config_command("init")
+                    with patch("typer.echo") as echo_mock:
+                        with self.assertRaises(Exit):
+                            config_command("init")
+
+        payload = json.loads(echo_mock.call_args.args[0])
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "CONFIG_EXISTS")

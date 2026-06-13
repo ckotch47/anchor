@@ -4,7 +4,7 @@ import json
 
 from pydantic import BaseModel
 
-from anchor.application.embedding_models import ChunkEmbeddingRecord
+from anchor.application.embeddings.models import ChunkEmbeddingRecord
 from anchor.application.provider_ports import EmbeddingsProviderPort
 
 
@@ -17,6 +17,14 @@ class EmbeddingService:
     def __init__(self, provider: EmbeddingsProviderPort, model: str) -> None:
         self._provider = provider
         self._model = model
+
+    def embed_texts(self, texts: list[str]) -> ChunkEmbeddingsResult:
+        vectors = self._provider.embed(texts=texts, model=self._model)
+        embeddings = [
+            ChunkEmbeddingRecord(chunk_id=f"text_{index}", model=self._model, embedding=vector)
+            for index, vector in enumerate(vectors)
+        ]
+        return ChunkEmbeddingsResult(model=self._model, embeddings=embeddings)
 
     def embed_chunks(self, chunk_ids: list[str], texts: list[str]) -> ChunkEmbeddingsResult:
         vectors = self._provider.embed(texts=texts, model=self._model)

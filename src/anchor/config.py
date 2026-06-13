@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class RuntimeConfig(BaseModel):
     default_view: str = "compact"
     default_limit: int = 20
+    default_project: str = "workspace"
     default_budget_tokens: int = 800
     retry_attempts: int = 3
     busy_timeout_ms: int = 250

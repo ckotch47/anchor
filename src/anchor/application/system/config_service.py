@@ -56,6 +56,14 @@ class ConfigService:
             profile_name=profile,
         )
 
+    def init(self, force: bool = False) -> ConfigResult:
+        config, config_path = self._repository.init_from_example(force=force)
+        return ConfigResult(
+            config=config,
+            config_path=str(config_path),
+            profile_name=None,
+        )
+
     def _set_model_field(self, model: BaseModel, key: str, raw_value: str) -> None:
         if key not in type(model).model_fields:
             raise ValueError(f"Unsupported config key: {key}")

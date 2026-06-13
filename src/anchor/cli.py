@@ -5,13 +5,31 @@ from typing import Annotated, Any
 
 import typer
 
-from anchor.application.config_service import ConfigResult
-from anchor.application.notes_service import NotesListResult
+from anchor.cli_notes import notes_add, notes_app, notes_get, notes_list, notes_search, notes_update
+from anchor.cli_shared import config_payload, emit_error
+from anchor.cli_tasks import tasks_add, tasks_app, tasks_done, tasks_list, tasks_search, tasks_update
 from anchor.container import build_container
 
 app = typer.Typer(add_completion=False, help="Qatoria Anchor")
-notes_app = typer.Typer(add_completion=False, help="Notes commands")
 app.add_typer(notes_app, name="notes")
+app.add_typer(tasks_app, name="tasks")
+
+__all__ = [
+    "app",
+    "config_command",
+    "db_command",
+    "health",
+    "notes_add",
+    "notes_get",
+    "notes_list",
+    "notes_search",
+    "notes_update",
+    "tasks_add",
+    "tasks_done",
+    "tasks_list",
+    "tasks_search",
+    "tasks_update",
+]
 
 
 @app.command()
@@ -34,15 +52,16 @@ def health(
         }
         typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
     except Exception as exc:
-        _emit_error("health", "DB_MIGRATION_FAILED", str(exc))
+        emit_error("health", "DB_MIGRATION_FAILED", str(exc))
 
 
 @app.command(name="config")
 def config_command(
-    action: Annotated[str, typer.Argument(..., help="get or set")],
+    action: Annotated[str, typer.Argument(..., help="get, set, or init")],
     section: Annotated[str | None, typer.Option("--section")] = None,
     key: Annotated[str | None, typer.Option("--key")] = None,
     value: Annotated[str | None, typer.Option("--value")] = None,
+    force: Annotated[bool, typer.Option("--force")] = False,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
     try:
@@ -58,17 +77,21 @@ def config_command(
                     value=value,
                     profile=profile,
                 )
+            case "init":
+                _handle_config_init(container, force=force)
             case _:
-                _emit_error("config", "INVALID_ARGS", "config action must be 'get' or 'set'")
+                emit_error("config", "INVALID_ARGS", "config action must be 'get', 'set', or 'init'")
     except ValueError as exc:
-        _emit_error("config", "INVALID_ARGS", str(exc))
+        emit_error("config", "INVALID_ARGS", str(exc))
+    except FileExistsError as exc:
+        emit_error("config", "CONFIG_EXISTS", str(exc))
     except Exception as exc:
-        _emit_error("config", "DB_MIGRATION_FAILED", str(exc))
+        emit_error("config", "DB_MIGRATION_FAILED", str(exc))
 
 
 def _handle_config_get(container: Any, profile: str | None = None) -> None:
     result = container.config_service.get(profile=profile)
-    typer.echo(json.dumps(_config_payload("config.get", result, container), ensure_ascii=False, indent=2))
+    typer.echo(json.dumps(config_payload("config.get", result, container), ensure_ascii=False, indent=2))
 
 
 def _handle_config_set(
@@ -79,44 +102,37 @@ def _handle_config_set(
     profile: str | None = None,
 ) -> None:
     if section is None or key is None or value is None:
-        _emit_error("config", "INVALID_ARGS", "config set requires --section, --key, and --value")
+        emit_error("config", "INVALID_ARGS", "config set requires --section, --key, and --value")
     result = container.config_service.set(
         section=section,
         key=key,
         value=value,
         profile=profile,
     )
-    typer.echo(json.dumps(_config_payload("config.set", result, container), ensure_ascii=False, indent=2))
+    typer.echo(json.dumps(config_payload("config.set", result, container), ensure_ascii=False, indent=2))
 
 
-def _config_payload(command: str, result: ConfigResult, container: Any) -> dict[str, Any]:
-    return {
-        "ok": True,
-        "command": command,
-        "data": {
-            "config": result.config.model_dump(),
-            "config_path": result.config_path,
-            "profile_name": result.profile_name,
-        },
-        "meta": {
-            "view": result.config.runtime.default_view,
-            "profile": result.profile_name or container.profile_name,
-        },
-    }
-
-
-def _emit_error(command: str, code: str, message: str) -> None:
-    payload = {
-        "ok": False,
-        "command": command,
-        "error": {
-            "code": code,
-            "message": message,
-            "retryable": False,
-        },
-    }
-    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
-    raise typer.Exit(code=1)
+def _handle_config_init(container: Any, force: bool = False) -> None:
+    result = container.config_service.init(force=force)
+    typer.echo(
+        json.dumps(
+            {
+                "ok": True,
+                "command": "config.init",
+                "data": {
+                    "config": result.config.model_dump(),
+                    "config_path": result.config_path,
+                    "profile_name": result.profile_name,
+                },
+                "meta": {
+                    "view": result.config.runtime.default_view,
+                    "profile": container.profile_name,
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 @app.command(name="db")
@@ -130,11 +146,11 @@ def db_command(
             case "migrate":
                 _handle_db_migrate(container)
             case _:
-                _emit_error("db", "INVALID_ARGS", "db action must be 'migrate'")
+                emit_error("db", "INVALID_ARGS", "db action must be 'migrate'")
     except typer.Exit:
         raise
     except Exception as exc:
-        _emit_error("db", "DB_MIGRATION_FAILED", str(exc))
+        emit_error("db", "DB_MIGRATION_FAILED", str(exc))
 
 
 def _handle_db_migrate(container: Any) -> None:
@@ -154,140 +170,3 @@ def _handle_db_migrate(container: Any) -> None:
         },
     }
     typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
-
-
-@notes_app.command(name="add")
-def notes_add(
-    title: Annotated[str, typer.Option("--title")],
-    body: Annotated[str, typer.Option("--body")],
-    source: Annotated[str, typer.Option("--source")] = "cli",
-    source_ref: Annotated[str, typer.Option("--source-ref")] = "",
-    pinned: Annotated[bool, typer.Option("--pinned")] = False,
-    profile: Annotated[str | None, typer.Option("--profile")] = None,
-) -> None:
-    try:
-        container = build_container(profile=profile)
-        result = container.notes_service.add(
-            title=title,
-            body=body,
-            source=source,
-            source_ref=source_ref,
-            pinned=pinned,
-        )
-        typer.echo(
-            json.dumps(
-                {
-                    "ok": True,
-                    "command": "notes.add",
-                    "data": {"note": result.model_dump()},
-                    "meta": {
-                        "view": container.config.runtime.default_view,
-                        "profile": container.profile_name,
-                        "config_path": container.config_path,
-                    },
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-    except ValueError as exc:
-        _emit_error("notes", "INVALID_ARGS", str(exc))
-    except Exception as exc:
-        _emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
-
-
-@notes_app.command(name="list")
-def notes_list(
-    limit: Annotated[int, typer.Option("--limit")] = 20,
-    profile: Annotated[str | None, typer.Option("--profile")] = None,
-) -> None:
-    try:
-        container = build_container(profile=profile)
-        result: NotesListResult = container.notes_service.list(limit=limit)
-        typer.echo(
-            json.dumps(
-                {
-                    "ok": True,
-                    "command": "notes.list",
-                    "data": {"count": result.count, "notes": [note.model_dump() for note in result.notes]},
-                    "meta": {
-                        "view": container.config.runtime.default_view,
-                        "profile": container.profile_name,
-                        "config_path": container.config_path,
-                    },
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-    except ValueError as exc:
-        _emit_error("notes", "INVALID_ARGS", str(exc))
-    except Exception as exc:
-        _emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
-
-
-@notes_app.command(name="get")
-def notes_get(
-    note_id: Annotated[str, typer.Option("--id")],
-    profile: Annotated[str | None, typer.Option("--profile")] = None,
-) -> None:
-    try:
-        container = build_container(profile=profile)
-        result = container.notes_service.get(note_id)
-        typer.echo(
-            json.dumps(
-                {
-                    "ok": True,
-                    "command": "notes.get",
-                    "data": {"note": result.model_dump()},
-                    "meta": {
-                        "view": container.config.runtime.default_view,
-                        "profile": container.profile_name,
-                        "config_path": container.config_path,
-                    },
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-    except LookupError as exc:
-        _emit_error("notes", "NOT_FOUND", str(exc))
-    except ValueError as exc:
-        _emit_error("notes", "INVALID_ARGS", str(exc))
-    except Exception as exc:
-        _emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
-
-
-@notes_app.command(name="search")
-def notes_search(
-    query: Annotated[str, typer.Option("--query")],
-    limit: Annotated[int, typer.Option("--limit")] = 20,
-    profile: Annotated[str | None, typer.Option("--profile")] = None,
-) -> None:
-    try:
-        container = build_container(profile=profile)
-        result = container.notes_service.search(query=query, limit=limit)
-        typer.echo(
-            json.dumps(
-                {
-                    "ok": True,
-                    "command": "notes.search",
-                    "data": {
-                        "query": result.query,
-                        "count": result.count,
-                        "results": [hit.model_dump() for hit in result.results],
-                    },
-                    "meta": {
-                        "view": container.config.runtime.default_view,
-                        "profile": container.profile_name,
-                        "config_path": container.config_path,
-                    },
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-    except ValueError as exc:
-        _emit_error("notes", "INVALID_ARGS", str(exc))
-    except Exception as exc:
-        _emit_error("notes", "DB_MIGRATION_FAILED", str(exc))

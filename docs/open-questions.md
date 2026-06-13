@@ -25,7 +25,6 @@
 - Exact default values for per-command limits and budgets.
 - Which commands expose `full` view by default, if any.
 - Packaging/distribution choice.
-- Exact shape of domain-specific metadata fields for notes, tasks, and history.
 
 ## Current stance
 

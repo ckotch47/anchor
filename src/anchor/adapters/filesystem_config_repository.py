@@ -59,6 +59,17 @@ class FileSystemConfigRepository:
             raise
         return self._config_path
 
+    def init_from_example(self, force: bool = False) -> tuple[AppConfig, Path]:
+        if self._config_path.exists() and not force:
+            raise FileExistsError(f"config already exists: {self._config_path}")
+        example_path = self._example_path()
+        if not example_path.exists():
+            raise FileNotFoundError(f"config example not found: {example_path}")
+        example_data = tomllib.loads(example_path.read_text(encoding="utf-8"))
+        config = AppConfig.model_validate(example_data or {})
+        self.save(config)
+        return config, self._config_path
+
     def _serialize(self, config: AppConfig) -> str:
         lines: list[str] = []
         lines.extend(self._serialize_section("runtime", config.runtime.model_dump()))
@@ -94,3 +105,6 @@ class FileSystemConfigRepository:
             return str(value)
         escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
+
+    def _example_path(self) -> Path:
+        return Path(__file__).resolve().parents[3] / "config.example.toml"

@@ -15,7 +15,8 @@ Build Qatoria Anchor as a production-oriented local system for agents:
 Anchor is a modular monolith.
 
 - `main` only wires the application
-- application services own use-cases
+- `application/system` owns config, health, and migration services
+- `application/<domain>` owns domain use-cases
 - adapters own external systems and SQLite access
 - CLI is the primary transport
 - MCP over `stdio` can be added later as another thin transport
@@ -39,14 +40,14 @@ Each context should have its own service and its own table(s), not a single poly
 Use a shared document spine plus domain tables.
 
 - `documents`
-  - canonical row for text, timestamps, source, and stable identifiers
+  - canonical row for text, timestamps, source, stable identifiers, project scope, and metatags
   - shared by notes, tasks, and history
 - `notes`
-  - note-specific metadata and relationships
+  - note-specific metadata, project scope, metatags, and relationships
 - `tasks`
-  - task-specific state, priority, and lifecycle
+  - task-specific state, priority, lifecycle, direct task-link fields, project scope, and metatags
 - `history_entries`
-  - append-only activity log / working history
+  - append-only activity log / working history, project scope, and metatags
 - `document_tags`
   - filtering and coarse retrieval
 - `document_links`
@@ -55,9 +56,9 @@ Use a shared document spine plus domain tables.
 Derived and operational tables:
 
 - `document_chunks`
-  - chunking for long text and retrieval candidates
+  - chunking for long text and retrieval candidates, carrying project scope for direct filtering
 - `chunk_embeddings`
-  - vector representations for semantic search
+  - vector representations for semantic search, carrying project scope for direct filtering
 - `index_states`
   - lifecycle for derived data
 - `events`
@@ -74,14 +75,19 @@ Retrieval is hybrid and should exist from the first production slice.
 1. Lexical candidate generation
    - FTS over canonical text and/or chunks
    - user query is normalized before `MATCH`
-   - search is filtered by document type before ranking
+   - search is filtered by project and document type before ranking
+   - metatags are filterable through indexed JSON keys or materialized search columns
 2. Vector candidate generation
-   - `sqlite-vector` backed similarity search
+   - local scoring over stored chunk embeddings
 3. Score fusion
    - explicit lexical/vector weighting, with lexical-only fallback when vector data is unavailable
 4. Rerank
    - local rerank model through an OpenAI-compatible provider interface
-5. Compact response
+   - rerank runs on the candidate pool before deduplication and trimming
+5. Dedup and trim
+   - keep one best chunk per document
+   - trim the final response to the configured token budget
+6. Compact response
    - return only the small result set the agent needs
 
 Fallback rules:
@@ -95,6 +101,13 @@ Fallback rules:
 - Embeddings and rerank are externalized behind an OpenAI-compatible client contract.
 - Local endpoints are allowed and preferred for this project.
 - The app should not depend on a remote server for the primary workflow.
+
+## Project scope contract
+
+- `project` and `metatags` are duplicated into every domain entity so list/search operations can scope locally without extra joins.
+- `tasks` should support common task relationships directly, while `document_links` remains the richer graph for cross-entity references and follow-up context.
+- `metatags` is stored as SQLite JSON text and treated as queryable metadata, not as PostgreSQL `jsonb`.
+- Search should scope by `project` first, then document type, then any metatag filters, and only then run lexical/vector/rerank ranking.
 
 ## Non-goals
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from anchor.adapters.filesystem_config_repository import FileSystemConfigRepository
 from anchor.adapters.sqlite_migration_repository import SqliteMigrationRepository
-from anchor.application.config_service import ConfigService
+from anchor.application.system.config_service import ConfigService
 
 
 class ConfigRepositoryTest(unittest.TestCase):
@@ -18,6 +18,7 @@ class ConfigRepositoryTest(unittest.TestCase):
 
         self.assertEqual(config.runtime.default_view, "compact")
         self.assertEqual(config.runtime.default_limit, 20)
+        self.assertEqual(config.runtime.default_project, "workspace")
         self.assertEqual(str(config_path), str(Path(tmpdir) / "config.toml"))
         self.assertIsNone(profile)
 
@@ -32,6 +33,26 @@ class ConfigRepositoryTest(unittest.TestCase):
 
         self.assertEqual(result.config.runtime.default_view, "full")
         self.assertEqual(result.config_path, str(config_path))
+
+    def test_init_from_example_creates_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            repo = FileSystemConfigRepository(config_path=config_path)
+
+            config, created_path = repo.init_from_example()
+
+            self.assertTrue(config_path.exists())
+            self.assertEqual(created_path, config_path)
+            self.assertEqual(config.runtime.default_project, "workspace")
+
+    def test_init_from_example_rejects_existing_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            repo = FileSystemConfigRepository(config_path=config_path)
+            repo.save(repo.load_raw()[0])
+
+            with self.assertRaises(FileExistsError):
+                repo.init_from_example()
 
     def test_profile_overlay_does_not_mutate_raw_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -61,9 +82,13 @@ class ConfigRepositoryTest(unittest.TestCase):
                     row[1]
                     for row in connection.execute("PRAGMA table_info(document_chunks_fts)").fetchall()
                 }
+                task_columns = {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(tasks)").fetchall()
+                }
 
-        self.assertEqual(result.applied, 3)
-        self.assertEqual(result.current_version, 3)
+        self.assertEqual(result.applied, 5)
+        self.assertEqual(result.current_version, 5)
         self.assertIn("schema_migrations", tables)
         self.assertIn("documents", tables)
         self.assertIn("notes", tables)
@@ -79,4 +104,8 @@ class ConfigRepositoryTest(unittest.TestCase):
         self.assertIn("index_states", tables)
         self.assertNotIn("items", tables)
         self.assertIn("document_type", fts_columns)
-        self.assertEqual(version_rows, [(1,), (2,), (3,)])
+        self.assertIn("task_kind", task_columns)
+        self.assertIn("started_at", task_columns)
+        self.assertIn("parent_document_id", task_columns)
+        self.assertIn("blocked_by_document_id", task_columns)
+        self.assertEqual(version_rows, [(1,), (2,), (3,), (4,), (5,)])

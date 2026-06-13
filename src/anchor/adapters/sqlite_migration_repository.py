@@ -198,6 +198,45 @@ JOIN documents AS d ON d.id = c.document_id
 WHERE d.deleted_at IS NULL;
 """.strip(),
     ),
+    Migration(
+        version=4,
+        name="0004_add_project_and_metatags_columns",
+        sql="""
+ALTER TABLE documents ADD COLUMN project TEXT NOT NULL DEFAULT 'workspace';
+ALTER TABLE documents ADD COLUMN metatags TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE notes ADD COLUMN project TEXT NOT NULL DEFAULT 'workspace';
+ALTER TABLE notes ADD COLUMN metatags TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE tasks ADD COLUMN project TEXT NOT NULL DEFAULT 'workspace';
+ALTER TABLE tasks ADD COLUMN metatags TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE history_entries ADD COLUMN project TEXT NOT NULL DEFAULT 'workspace';
+ALTER TABLE history_entries ADD COLUMN metatags TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE document_chunks ADD COLUMN project TEXT NOT NULL DEFAULT 'workspace';
+ALTER TABLE document_chunks ADD COLUMN metatags TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE chunk_embeddings ADD COLUMN project TEXT NOT NULL DEFAULT 'workspace';
+ALTER TABLE chunk_embeddings ADD COLUMN metatags TEXT NOT NULL DEFAULT '{}';
+
+CREATE INDEX IF NOT EXISTS idx_documents_project_type_updated_at ON documents(project, document_type, updated_at);
+CREATE INDEX IF NOT EXISTS idx_notes_project_pinned_archived_at ON notes(project, pinned, archived_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_project_status_priority_due_at ON tasks(project, status, priority, due_at);
+CREATE INDEX IF NOT EXISTS idx_history_entries_project_actor ON history_entries(project, actor);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_project_document_id_chunk_index ON document_chunks(project, document_id, chunk_index);
+CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_project_model ON chunk_embeddings(project, model);
+""".strip(),
+    ),
+    Migration(
+        version=5,
+        name="0005_expand_tasks_schema",
+        sql="""
+ALTER TABLE tasks ADD COLUMN task_kind TEXT NOT NULL DEFAULT 'task';
+ALTER TABLE tasks ADD COLUMN started_at TEXT;
+ALTER TABLE tasks ADD COLUMN parent_document_id TEXT;
+ALTER TABLE tasks ADD COLUMN blocked_by_document_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_tasks_project_task_kind_status_priority_due_at ON tasks(project, task_kind, status, priority, due_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_project_parent_document_id ON tasks(project, parent_document_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_project_blocked_by_document_id ON tasks(project, blocked_by_document_id);
+""".strip(),
+    ),
 ]
 
 
