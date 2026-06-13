@@ -3,11 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from anchor.adapters.filesystem_config_repository import FileSystemConfigRepository
+from anchor.adapters.sqlite_files_repository import SqliteFilesRepository
 from anchor.adapters.sqlite_migration_repository import SqliteMigrationRepository
 from anchor.adapters.sqlite_notes_repository import SqliteNotesRepository
 from anchor.adapters.sqlite_tasks_repository import SqliteTasksRepository
 from anchor.application.embeddings.provider_service import OpenAICompatibleEmbeddingsProvider
 from anchor.application.embeddings.service import EmbeddingService
+from anchor.application.files.chunking import FileChunkingService
+from anchor.application.files.service import FilesService
 from anchor.application.notes.service import NotesService
 from anchor.application.retrieval.document_chunking import DocumentChunkingService
 from anchor.application.retrieval.rerank_service import RerankService
@@ -29,6 +32,7 @@ class Container:
     migration_service: MigrationService
     notes_service: NotesService
     tasks_service: TasksService
+    files_service: FilesService
     search_service: SearchService
 
 
@@ -69,9 +73,21 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         project=config.runtime.default_project,
         budget_tokens=config.runtime.default_budget_tokens,
     )
+    files_service = FilesService(
+        repository=SqliteFilesRepository(database_path=database_path),
+        chunking_service=FileChunkingService(),
+        project=config.runtime.default_project,
+        roots=config.filesystem.roots,
+        ignore_patterns=config.filesystem.ignore_patterns,
+        max_file_size=config.filesystem.max_file_size,
+        chunk_size=config.vector.chunk_size,
+        chunk_overlap=config.vector.chunk_overlap,
+        budget_tokens=config.runtime.default_budget_tokens,
+    )
     search_service = SearchService(
         notes_service=notes_service,
         tasks_service=tasks_service,
+        files_service=files_service,
         budget_tokens=config.runtime.default_budget_tokens,
     )
     if auto_migrate:
@@ -85,5 +101,6 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         migration_service=migration_service,
         notes_service=notes_service,
         tasks_service=tasks_service,
+        files_service=files_service,
         search_service=search_service,
     )

@@ -77,6 +77,8 @@ class FileSystemConfigRepository:
         lines.extend(self._serialize_section("provider", config.provider.model_dump()))
         lines.append("")
         lines.extend(self._serialize_section("vector", config.vector.model_dump()))
+        lines.append("")
+        lines.extend(self._serialize_section("filesystem", config.filesystem.model_dump()))
         if config.profiles:
             lines.append("")
             for profile_name in sorted(config.profiles):
@@ -103,6 +105,8 @@ class FileSystemConfigRepository:
             return "true" if value else "false"
         if isinstance(value, (int, float)):
             return str(value)
+        if isinstance(value, list):
+            return "[" + ", ".join(self._format_value(item) for item in value) + "]"
         escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
 

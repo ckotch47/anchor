@@ -54,3 +54,18 @@
 - add search quality checks
 - add provider fallback behavior
 - add documentation polish
+
+## Phase 6: Filesystem retrieval
+
+- add live filesystem indexing for project roots without copying file contents into the source-of-truth database
+- add `indexed_files` and `file_chunks` tables, with `documents.document_type` extended to include `file`
+- add file discovery rules for included/excluded paths, file size limits, and binary detection
+- add `gitignore`-aware filtering, with fallback to filesystem metadata and mtime when git metadata is unavailable
+- add clean-up on rename and delete so stale chunks do not survive removed files
+- add incremental reindexing based on filesystem change tracking
+- add content-aware file chunking: Python `def`/`class`, Markdown `#` headings, fallback sliding window with overlap
+- wire file chunking to `vector.chunk_size` and `vector.chunk_overlap`
+- add file/chunk retrieval commands with compact responses for agents
+- add project-scoped search over indexed files, code, docs, notes, tasks, and history
+- add explicit config for roots, ignore patterns, and refresh policy
+- add tests for index rebuild, change detection, and negative path handling

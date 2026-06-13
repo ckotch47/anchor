@@ -29,6 +29,22 @@ class VectorConfig(BaseModel):
     chunk_overlap: int = Field(default=50, ge=0)
 
 
+class FilesystemConfig(BaseModel):
+    roots: list[str] = Field(default_factory=list)
+    ignore_patterns: list[str] = Field(
+        default_factory=lambda: [
+            ".git/",
+            "node_modules/",
+            "dist/",
+            "build/",
+            "__pycache__/",
+            "*.pyc",
+        ]
+    )
+    max_file_size: int = Field(default=1_000_000, gt=0)
+    refresh_policy: str = "mtime"
+
+
 class ProfileConfig(BaseModel):
     view: str = "compact"
     limit: int = 20
@@ -38,6 +54,7 @@ class AppConfig(BaseModel):
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
     vector: VectorConfig = Field(default_factory=VectorConfig)
+    filesystem: FilesystemConfig = Field(default_factory=FilesystemConfig)
     profiles: dict[str, ProfileConfig] = Field(default_factory=dict)
 
     @classmethod

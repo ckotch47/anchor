@@ -1,0 +1,1 @@
+"""Filesystem indexing application package."""

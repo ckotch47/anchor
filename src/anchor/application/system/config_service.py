@@ -39,6 +39,8 @@ class ConfigService:
                 self._set_model_field(config.provider, key, value)
             case "vector":
                 self._set_model_field(config.vector, key, value)
+            case "filesystem":
+                self._set_model_field(config.filesystem, key, value)
             case "profiles":
                 target_profile = profile or "default"
                 profile_model = config.profiles.get(target_profile)
@@ -78,6 +80,16 @@ class ConfigService:
             return int(raw_value)
         if isinstance(current, float):
             return float(raw_value)
+        if isinstance(current, list):
+            stripped = raw_value.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                import json
+
+                parsed = json.loads(stripped)
+                if not isinstance(parsed, list):
+                    raise ValueError("invalid list value")
+                return parsed
+            return [item.strip() for item in raw_value.split(",") if item.strip()]
         return raw_value
 
     @staticmethod

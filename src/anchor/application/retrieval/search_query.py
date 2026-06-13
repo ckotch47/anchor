@@ -5,12 +5,12 @@ import re
 from pydantic import BaseModel, Field, model_validator
 
 _TOKEN_PATTERN = re.compile(r"[^\W_]+(?:[-'][^\W_]+)*", re.UNICODE)
-_ALLOWED_SEARCH_TYPES = {"notes", "tasks", "history"}
+_ALLOWED_SEARCH_TYPES = {"notes", "tasks", "history", "files"}
 
 
 class SearchQuery(BaseModel):
     query: str
-    types: list[str] = Field(default_factory=lambda: ["notes", "tasks"])
+    types: list[str] = Field(default_factory=lambda: ["notes", "tasks", "files"])
     project: str
     limit: int = 20
     budget_tokens: int = 800

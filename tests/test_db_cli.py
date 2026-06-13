@@ -25,7 +25,7 @@ class DbCliTest(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["command"], "db.migrate")
         self.assertEqual(payload["data"]["database_path"], str(db_path))
-        self.assertEqual(payload["data"]["current_version"], 5)
+        self.assertEqual(payload["data"]["current_version"], 6)
 
     def test_db_migrate_failure_emits_machine_error(self) -> None:
         container = patch("anchor.cli.build_container")

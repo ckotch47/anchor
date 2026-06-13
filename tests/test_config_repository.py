@@ -87,8 +87,8 @@ class ConfigRepositoryTest(unittest.TestCase):
                     for row in connection.execute("PRAGMA table_info(tasks)").fetchall()
                 }
 
-        self.assertEqual(result.applied, 5)
-        self.assertEqual(result.current_version, 5)
+        self.assertEqual(result.applied, 6)
+        self.assertEqual(result.current_version, 6)
         self.assertIn("schema_migrations", tables)
         self.assertIn("documents", tables)
         self.assertIn("notes", tables)
@@ -97,6 +97,9 @@ class ConfigRepositoryTest(unittest.TestCase):
         self.assertIn("document_chunks", tables)
         self.assertIn("chunk_embeddings", tables)
         self.assertIn("document_chunks_fts", tables)
+        self.assertIn("indexed_files", tables)
+        self.assertIn("file_chunks", tables)
+        self.assertIn("file_chunks_fts", tables)
         self.assertIn("document_tags", tables)
         self.assertIn("document_links", tables)
         self.assertIn("events", tables)
@@ -108,4 +111,4 @@ class ConfigRepositoryTest(unittest.TestCase):
         self.assertIn("started_at", task_columns)
         self.assertIn("parent_document_id", task_columns)
         self.assertIn("blocked_by_document_id", task_columns)
-        self.assertEqual(version_rows, [(1,), (2,), (3,), (4,), (5,)])
+        self.assertEqual(version_rows, [(1,), (2,), (3,), (4,), (5,), (6,)])

@@ -237,6 +237,90 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project_parent_document_id ON tasks(project
 CREATE INDEX IF NOT EXISTS idx_tasks_project_blocked_by_document_id ON tasks(project, blocked_by_document_id);
 """.strip(),
     ),
+    Migration(
+        version=6,
+        name="0006_filesystem_indexing",
+        sql="""
+PRAGMA foreign_keys = OFF;
+
+CREATE TABLE documents_new (
+    id TEXT PRIMARY KEY,
+    project TEXT NOT NULL DEFAULT 'workspace',
+    metatags TEXT NOT NULL DEFAULT '{}',
+    document_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    source TEXT NOT NULL,
+    source_ref TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    CHECK (document_type IN ('note', 'task', 'history', 'file'))
+);
+
+INSERT INTO documents_new (
+    id, project, metatags, document_type, title, body, source, source_ref, created_at, updated_at, deleted_at
+)
+SELECT
+    id, project, metatags, document_type, title, body, source, source_ref, created_at, updated_at, deleted_at
+FROM documents;
+
+DROP TABLE documents;
+
+ALTER TABLE documents_new RENAME TO documents;
+
+PRAGMA foreign_keys = ON;
+
+CREATE INDEX IF NOT EXISTS idx_documents_type_updated_at ON documents(document_type, updated_at);
+CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source, source_ref);
+CREATE INDEX IF NOT EXISTS idx_documents_project_type_updated_at ON documents(project, document_type, updated_at);
+
+CREATE TABLE IF NOT EXISTS indexed_files (
+    document_id TEXT PRIMARY KEY,
+    project TEXT NOT NULL,
+    path TEXT NOT NULL,
+    root_path TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT '',
+    metatags TEXT NOT NULL DEFAULT '{}',
+    file_size INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    mtime_ns INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS file_chunks (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    project TEXT NOT NULL,
+    path TEXT NOT NULL,
+    root_path TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT '',
+    chunk_index INTEGER NOT NULL,
+    start_line INTEGER NOT NULL,
+    end_line INTEGER NOT NULL,
+    chunk_text TEXT NOT NULL,
+    token_count INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS file_chunks_fts USING fts5(
+    document_type UNINDEXED,
+    document_id UNINDEXED,
+    chunk_id UNINDEXED,
+    path,
+    chunk_text
+);
+
+CREATE INDEX IF NOT EXISTS idx_indexed_files_project_path ON indexed_files(project, path);
+CREATE INDEX IF NOT EXISTS idx_indexed_files_project_root_path ON indexed_files(project, root_path);
+CREATE INDEX IF NOT EXISTS idx_file_chunks_project_document_id ON file_chunks(project, document_id);
+CREATE INDEX IF NOT EXISTS idx_file_chunks_project_path_chunk_index ON file_chunks(project, path, chunk_index);
+""".strip(),
+    ),
 ]
 
 

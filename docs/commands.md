@@ -244,15 +244,40 @@ anchor tasks search --query "deploy" --limit 5 --project repo-a
 ### `anchor search`
 
 - Searches across multiple domain slices in one request.
-- Use `--types notes,tasks` to scope the retrieval surface explicitly.
+- Use `--types notes,tasks,files` to scope the retrieval surface explicitly.
 - The request is modeled as a first-class search query with `query`, `types`, `project`, `limit`, `budget_tokens`, and optional `weights`.
 - The result envelope stays compact and can add explain-style retrieval stats with `--explain`.
-- Current support covers `notes` and `tasks`; `history` is reserved for the later slice.
+- Current support covers `notes`, `tasks`, and `files`; `history` is reserved for the later slice.
 
 Example:
 
 ```bash
-anchor search --query "deploy" --types notes,tasks --limit 5 --project repo-a --explain
+anchor search --query "deploy" --types notes,tasks,files --limit 5 --project repo-a --explain
+```
+
+### `anchor files index`
+
+- Indexes live filesystem roots into `indexed_files` and `file_chunks`.
+- Uses `--root` to point at one or more project roots.
+- Applies `.gitignore`-aware filtering, binary detection, and `chunk_size` / `chunk_overlap` from config.
+- Keeps the filesystem as the source of truth and stores only retrieval metadata in SQLite.
+
+Example:
+
+```bash
+anchor files index --root ./repo --project repo-a
+```
+
+### `anchor files search`
+
+- Searches indexed files through the same compact retrieval surface as notes and tasks.
+- Returns file path, root path, language, file size, a snippet, and a compact score.
+- Uses the configured project scope by default.
+
+Example:
+
+```bash
+anchor files search --query "greet" --project repo-a
 ```
 
 ### `anchor tasks update`
@@ -321,6 +346,8 @@ anchor tasks delete --id task_123 --project repo-a
 - `anchor tasks update`
 - `anchor tasks list`
 - `anchor tasks done`
+- `anchor files index`
+- `anchor files search`
 - `anchor history append`
 - `anchor history search`
 - `anchor db migrate`
@@ -337,6 +364,7 @@ anchor tasks delete --id task_123 --project repo-a
 
 - `memory` is the unified retrieval surface over notes/tasks/history, not a separate source of truth.
 - `notes` already reuses the shared retrieval-ready SQLite core.
+- `files` adds live filesystem indexing on top of the same retrieval core.
 - `history` and `tasks` will reuse the same core when their slices land.
 - Each domain owns its table(s), while search uses shared document spine + derived retrieval tables.
 - `project` and `metatags` are part of the target contract for all domain entities and should be respected by list/search commands.

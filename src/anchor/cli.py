@@ -5,6 +5,7 @@ from typing import Annotated, Any
 
 import typer
 
+from anchor.cli_files import files_app, files_index, files_search
 from anchor.cli_notes import notes_add, notes_app, notes_delete, notes_get, notes_list, notes_search, notes_update
 from anchor.cli_search import search_command
 from anchor.cli_shared import config_payload, emit_error
@@ -13,6 +14,7 @@ from anchor.container import build_container
 
 app = typer.Typer(add_completion=False, help="Qatoria Anchor")
 app.add_typer(notes_app, name="notes")
+app.add_typer(files_app, name="files")
 app.add_typer(tasks_app, name="tasks")
 app.command(name="search")(search_command)
 
@@ -20,6 +22,8 @@ __all__ = [
     "app",
     "config_command",
     "db_command",
+    "files_index",
+    "files_search",
     "health",
     "notes_add",
     "notes_delete",

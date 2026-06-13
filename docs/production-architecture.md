@@ -27,6 +27,7 @@ Anchor is a modular monolith.
 - `tasks`
 - `history`
 - `search/indexing`
+- `filesystem/indexing`
 - `config`
 - `ops`
 - `memory`
@@ -63,6 +64,10 @@ Derived and operational tables:
   - lifecycle for derived data
 - `events`
   - audit trail
+- `indexed_files`
+  - live filesystem discovery, file metadata, language, root path, refresh state, and retrieval pointers without duplicating file contents
+- `file_chunks`
+  - retrieval chunks for indexed files when file length requires slicing
 - `settings`
   - runtime and system settings
 - `schema_migrations`
@@ -90,6 +95,17 @@ Retrieval is hybrid and should exist from the first production slice.
 6. Compact response
    - return only the small result set the agent needs
 
+Filesystem retrieval uses the same retrieval stack, but the source of truth is the live filesystem:
+
+- index project roots on disk, not copied file snapshots
+- use `vector.chunk_size` and `vector.chunk_overlap` for file chunking defaults
+- chunk files by content type: Python `def`/`class`, Markdown `#` headings, fallback sliding window by lines
+- exclude binaries, vendor folders, build outputs, and configured ignore paths
+- handle repositories without git by falling back to filesystem metadata and mtime
+- clean stale chunks when files are removed or renamed
+- store only metadata and retrieval slices in SQLite
+- keep the file index incremental so refreshes are bounded
+
 Fallback rules:
 
 - if embeddings or rerank are unavailable, lexical retrieval still works
@@ -108,6 +124,8 @@ Fallback rules:
 - `tasks` should support common task relationships directly, while `document_links` remains the richer graph for cross-entity references and follow-up context.
 - `metatags` is stored as SQLite JSON text and treated as queryable metadata, not as PostgreSQL `jsonb`.
 - Search should scope by `project` first, then document type, then any metatag filters, and only then run lexical/vector/rerank ranking.
+- Filesystem retrieval should scope by project and root path before indexing, then apply ignore rules before any chunking or ranking.
+- Cross-type retrieval should accept notes, tasks, history, and files as first-class search targets once the file slice lands.
 
 ## Non-goals
 

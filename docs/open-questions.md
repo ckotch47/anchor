@@ -26,6 +26,16 @@
 - Which commands expose `full` view by default, if any.
 - Packaging/distribution choice.
 
+## Already decided for filesystem retrieval
+
+- Use a dedicated `indexed_files` table plus `file_chunks` instead of stuffing path/language into `metatags`.
+- Extend `documents.document_type` to include `file`.
+- Use `vector.chunk_size` and `vector.chunk_overlap` for file chunking defaults.
+- File chunking must be content-aware: Python `def`/`class`, Markdown `#` headings, fallback sliding window.
+- `.gitignore`-aware filtering is mandatory, with fallback to filesystem metadata and `mtime` when git is unavailable.
+- Binary files must be detected before read/chunking.
+- Rename/delete must clean stale chunks and index rows.
+
 ## Current stance
 
 - Prefer the smallest possible response that is still useful.

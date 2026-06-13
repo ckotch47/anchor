@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from anchor.application.files.models import FileListItem, FileSearchHit, FilesSearchResult
 from anchor.application.notes.models import NoteRecord, NotesSearchHit, NotesSearchResult
 from anchor.application.retrieval.search_query import SearchQuery
 from anchor.application.retrieval.search_service import SearchService
@@ -70,23 +71,60 @@ class FakeTasksService:
         )
 
 
-class SearchServiceTest(unittest.TestCase):
-    def test_search_combines_notes_and_tasks(self) -> None:
-        service = SearchService(FakeNotesService(), FakeTasksService(), budget_tokens=100)
-
-        result = service.search(
-            SearchQuery(query="deploy", project="repo-a", types=["notes", "tasks"], explain=True, budget_tokens=100)
+class FakeFilesService:
+    def search(
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        project: str | None = None,
+        budget_tokens: int | None = None,
+    ) -> FilesSearchResult:
+        del query, limit, budget_tokens
+        return FilesSearchResult(
+            query="deploy",
+            count=1,
+            results=[
+                FileSearchHit(
+                    file=FileListItem(
+                        id="file_1",
+                        path="/repo/deploy.py",
+                        root_path="/repo",
+                        language="python",
+                        file_size=42,
+                    ),
+                    chunk_id="chunk_3",
+                    score=0.75,
+                    snippet="deploy file snippet",
+                )
+            ],
         )
 
-        self.assertEqual(result.count, 2)
-        self.assertEqual([hit.entity_type for hit in result.results], ["notes", "tasks"])
+
+class SearchServiceTest(unittest.TestCase):
+    def test_search_combines_notes_and_tasks(self) -> None:
+        service = SearchService(FakeNotesService(), FakeTasksService(), FakeFilesService(), budget_tokens=100)
+
+        result = service.search(
+            SearchQuery(
+                query="deploy",
+                project="repo-a",
+                types=["notes", "tasks", "files"],
+                explain=True,
+                budget_tokens=100,
+            )
+        )
+
+        self.assertEqual(result.count, 3)
+        self.assertEqual([hit.entity_type for hit in result.results], ["notes", "tasks", "files"])
         self.assertIsNotNone(result.stats)
-        self.assertEqual(result.stats.returned_count, 2)
+        self.assertEqual(result.stats.returned_count, 3)
         self.assertEqual(result.stats.candidate_counts["notes"], 1)
         self.assertEqual(result.stats.candidate_counts["tasks"], 1)
+        self.assertEqual(result.stats.candidate_counts["files"], 1)
 
     def test_search_rejects_unsupported_types(self) -> None:
-        service = SearchService(FakeNotesService(), FakeTasksService())
+        service = SearchService(FakeNotesService(), FakeTasksService(), FakeFilesService())
 
         with self.assertRaises(ValueError):
             service.search(SearchQuery(query="deploy", project="repo-a", types=["history"], budget_tokens=100))

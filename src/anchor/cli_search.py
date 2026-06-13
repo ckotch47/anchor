@@ -12,7 +12,7 @@ from anchor.container import build_container
 
 def _parse_search_types(raw_types: str | None) -> list[str]:
     if raw_types is None or not raw_types.strip():
-        return ["notes", "tasks"]
+        return ["notes", "tasks", "files"]
     return [search_type.strip() for search_type in raw_types.split(",") if search_type.strip()]
 
 

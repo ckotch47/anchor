@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from collections import OrderedDict
 
+from anchor.application.files.models import FilesSearchResult
+from anchor.application.files.service import FilesService
 from anchor.application.notes.models import NotesSearchResult
 from anchor.application.notes.service import NotesService
 from anchor.application.retrieval.document_chunking import count_tokens
@@ -11,7 +13,7 @@ from anchor.application.retrieval.search_query import SearchQuery
 from anchor.application.tasks.models import TasksSearchResult
 from anchor.application.tasks.service import TasksService
 
-_SUPPORTED_TYPES = {"notes", "tasks"}
+_SUPPORTED_TYPES = {"notes", "tasks", "files"}
 
 
 class SearchService:
@@ -19,11 +21,13 @@ class SearchService:
         self,
         notes_service: NotesService,
         tasks_service: TasksService,
+        files_service: FilesService,
         *,
         budget_tokens: int = 800,
     ) -> None:
         self._notes_service = notes_service
         self._tasks_service = tasks_service
+        self._files_service = files_service
         self._budget_tokens = budget_tokens
 
     def search(self, search_query: SearchQuery) -> SearchResult:
@@ -54,6 +58,15 @@ class SearchService:
                 )
                 candidate_counts[search_type] = tasks_result.count
                 candidates.extend(self._tasks_hits(tasks_result, search_query.project))
+            elif search_type == "files":
+                files_result = self._files_service.search(
+                    search_query.query,
+                    limit=candidate_limit,
+                    project=search_query.project,
+                    budget_tokens=per_type_budgets[search_type],
+                )
+                candidate_counts[search_type] = files_result.count
+                candidates.extend(self._files_hits(files_result, search_query.project))
         deduplicated = self._deduplicate(candidates)
         ordered = sorted(deduplicated, key=lambda item: item.score, reverse=True)
         trimmed = self._trim_to_budget(ordered, search_query.budget_tokens)
@@ -92,6 +105,25 @@ class SearchService:
                 attributes={
                     "status": hit.task.status,
                     "priority": hit.task.priority,
+                },
+            )
+            for hit in result.results
+        ]
+
+    def _files_hits(self, result: FilesSearchResult, project: str) -> list[SearchHit]:
+        return [
+            SearchHit(
+                entity_type="files",
+                entity_id=hit.file.id,
+                project=project,
+                title=hit.file.path,
+                score=hit.score,
+                snippet=hit.snippet,
+                attributes={
+                    "path": hit.file.path,
+                    "root_path": hit.file.root_path,
+                    "language": hit.file.language,
+                    "file_size": hit.file.file_size,
                 },
             )
             for hit in result.results
