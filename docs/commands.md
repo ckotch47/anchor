@@ -153,6 +153,19 @@ Example:
 anchor notes update --id note_123 --title "RAG plan v2" --project repo-a
 ```
 
+### `anchor notes delete`
+
+- Soft-deletes a note in the shared SQLite core.
+- Use `--id` with the note id returned by `notes add` or `notes list`.
+- Use `--project` to delete from a non-default project scope.
+- The deleted note is removed from list/search/get visibility and its retrieval chunks are purged.
+
+Example:
+
+```bash
+anchor notes delete --id note_123 --project repo-a
+```
+
 ### `anchor notes list`
 
 - Returns the newest notes first.
@@ -228,6 +241,20 @@ Example:
 anchor tasks search --query "deploy" --limit 5 --project repo-a
 ```
 
+### `anchor search`
+
+- Searches across multiple domain slices in one request.
+- Use `--types notes,tasks` to scope the retrieval surface explicitly.
+- The request is modeled as a first-class search query with `query`, `types`, `project`, `limit`, `budget_tokens`, and optional `weights`.
+- The result envelope stays compact and can add explain-style retrieval stats with `--explain`.
+- Current support covers `notes` and `tasks`; `history` is reserved for the later slice.
+
+Example:
+
+```bash
+anchor search --query "deploy" --types notes,tasks --limit 5 --project repo-a --explain
+```
+
 ### `anchor tasks update`
 
 - Partially updates a task in the shared SQLite core.
@@ -266,6 +293,19 @@ Example:
 
 ```bash
 anchor tasks done --id task_123 --project repo-a
+```
+
+### `anchor tasks delete`
+
+- Soft-deletes a task in the shared SQLite core.
+- Use `--id` with the task id returned by `tasks add` or `tasks list`.
+- Use `--project` to delete from a non-default project scope.
+- The deleted task is removed from list/search/get visibility and its retrieval chunk is purged.
+
+Example:
+
+```bash
+anchor tasks delete --id task_123 --project repo-a
 ```
 
 ## Target command set

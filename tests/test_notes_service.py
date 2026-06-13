@@ -131,6 +131,15 @@ class FakeNotesRepository:
     def search(self, query: str, limit: int, *, project: str):  # pragma: no cover - not used in test
         return []
 
+    def delete(self, note_id: str, *, project: str):
+        del project
+        if self.created is None or self.created.id != note_id:
+            return None
+        deleted = self.created
+        self.created = None
+        self._chunks = []
+        return deleted
+
 
 class FakeEmbeddingsProvider:
     def embed(self, texts: list[str], model: str) -> list[list[float]]:
@@ -336,3 +345,19 @@ class NotesServiceTest(unittest.TestCase):
 
         self.assertEqual(result.count, 2)
         self.assertEqual([item.note.id for item in result.results], ["note_1", "note_2"])
+
+    def test_delete_removes_note_from_repository(self) -> None:
+        repo = FakeNotesRepository()
+        service = NotesService(
+            repository=repo,
+            chunking_service=DocumentChunkingService(),
+            project="workspace",
+        )
+
+        service.add(title="Hello", body="one two three", source="cli")
+        deleted = service.delete("note_1")
+
+        self.assertEqual(deleted.id, "note_1")
+        self.assertIsNone(repo.created)
+        with self.assertRaises(LookupError):
+            service.get("note_1")

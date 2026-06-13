@@ -121,13 +121,20 @@ class TasksService:
             ],
         )
 
-    def search(self, query: str, limit: int = 20, *, project: str | None = None) -> TasksSearchResult:
+    def search(
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        project: str | None = None,
+        budget_tokens: int | None = None,
+    ) -> TasksSearchResult:
         self._require_non_empty(query, "query")
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
         results = self._trim_to_budget(
             self._repository.search(query=query, limit=limit, project=project or self._project),
-            self._budget_tokens,
+            budget_tokens if budget_tokens is not None else self._budget_tokens,
         )
         return TasksSearchResult(query=query, count=len(results), results=results)
 
@@ -137,6 +144,13 @@ class TasksService:
         if task is None:
             raise LookupError(f"task not found: {task_id}")
         return task
+
+    def delete(self, task_id: str, *, project: str | None = None) -> TaskRecord:
+        self._require_non_empty(task_id, "id")
+        deleted = self._repository.delete(task_id, project=project or self._project)
+        if deleted is None:
+            raise LookupError(f"task not found: {task_id}")
+        return deleted
 
     @staticmethod
     def _require_non_empty(value: str, field: str) -> None:

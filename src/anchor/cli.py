@@ -5,14 +5,16 @@ from typing import Annotated, Any
 
 import typer
 
-from anchor.cli_notes import notes_add, notes_app, notes_get, notes_list, notes_search, notes_update
+from anchor.cli_notes import notes_add, notes_app, notes_delete, notes_get, notes_list, notes_search, notes_update
+from anchor.cli_search import search_command
 from anchor.cli_shared import config_payload, emit_error
-from anchor.cli_tasks import tasks_add, tasks_app, tasks_done, tasks_list, tasks_search, tasks_update
+from anchor.cli_tasks import tasks_add, tasks_app, tasks_delete, tasks_done, tasks_list, tasks_search, tasks_update
 from anchor.container import build_container
 
 app = typer.Typer(add_completion=False, help="Qatoria Anchor")
 app.add_typer(notes_app, name="notes")
 app.add_typer(tasks_app, name="tasks")
+app.command(name="search")(search_command)
 
 __all__ = [
     "app",
@@ -20,16 +22,21 @@ __all__ = [
     "db_command",
     "health",
     "notes_add",
+    "notes_delete",
     "notes_get",
     "notes_list",
     "notes_search",
     "notes_update",
+    "search",
     "tasks_add",
+    "tasks_delete",
     "tasks_done",
     "tasks_list",
     "tasks_search",
     "tasks_update",
 ]
+
+search = search_command
 
 
 @app.command()

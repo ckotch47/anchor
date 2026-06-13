@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from typer import Exit
 
-from anchor.cli import notes_add, notes_get, notes_list, notes_search, notes_update
+from anchor.cli import notes_add, notes_delete, notes_get, notes_list, notes_search, notes_update
 
 
 class NotesCliTest(unittest.TestCase):
@@ -154,3 +154,22 @@ class NotesCliTest(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["command"], "notes")
         self.assertEqual(payload["error"]["code"], "INVALID_ARGS")
+
+    def test_notes_delete_emit_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            db_path = Path(tmpdir) / "anchor.sqlite3"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=db_path):
+                    with patch("typer.echo") as add_echo_mock:
+                        notes_add(title="Delete me", body="Body text", source="cli", project="repo-a")
+                    note_id = json.loads(add_echo_mock.call_args.args[0])["data"]["note"]["id"]
+
+                    with patch("typer.echo") as delete_echo_mock:
+                        notes_delete(note_id=note_id, project="repo-a")
+
+        delete_payload = json.loads(delete_echo_mock.call_args.args[0])
+        self.assertTrue(delete_payload["ok"])
+        self.assertEqual(delete_payload["command"], "notes.delete")
+        self.assertEqual(delete_payload["data"]["note"]["id"], note_id)
+        self.assertEqual(delete_payload["meta"]["project"], "repo-a")

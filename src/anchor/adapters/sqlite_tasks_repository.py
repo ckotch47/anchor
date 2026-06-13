@@ -269,6 +269,37 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                 raise RuntimeError("completed task could not be reloaded")
             return updated
 
+    def delete(self, task_id: str, *, project: str) -> TaskRecord | None:
+        current = self.get(task_id, project=project)
+        if current is None:
+            return None
+        now = utc_now_iso()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE documents
+                SET deleted_at = ?, updated_at = ?
+                WHERE id = ? AND project = ? AND document_type = 'task' AND deleted_at IS NULL
+                """,
+                (now, now, task_id, project),
+            )
+            connection.execute(
+                """
+                DELETE FROM document_chunks_fts
+                WHERE document_type = 'task' AND document_id = ?
+                """,
+                (task_id,),
+            )
+            connection.execute(
+                """
+                DELETE FROM document_chunks
+                WHERE document_id = ?
+                """,
+                (task_id,),
+            )
+            connection.commit()
+        return current
+
     def search(self, query: str, limit: int, *, project: str) -> list[TaskSearchHit]:
         match_query = normalize_fts5_query(query)
         self._backfill_missing_task_chunks(project=project)

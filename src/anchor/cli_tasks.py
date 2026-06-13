@@ -203,3 +203,33 @@ def tasks_done(
         emit_error("tasks", "INVALID_ARGS", str(exc))
     except Exception as exc:
         emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
+
+
+@tasks_app.command(name="delete")
+def tasks_delete(
+    task_id: Annotated[str, typer.Option("--id")],
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+) -> None:
+    try:
+        container = build_container(profile=profile)
+        resolved_project = resolve_project(container, project)
+        result = container.tasks_service.delete(task_id, project=resolved_project)
+        typer.echo(
+            json.dumps(
+                build_success_payload(
+                    "tasks.delete",
+                    {"task": result.model_dump()},
+                    container,
+                    extra_meta={"project": resolved_project},
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    except LookupError as exc:
+        emit_error("tasks", "NOT_FOUND", str(exc))
+    except ValueError as exc:
+        emit_error("tasks", "INVALID_ARGS", str(exc))
+    except Exception as exc:
+        emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))

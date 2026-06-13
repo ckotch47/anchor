@@ -131,6 +131,13 @@ class NotesService:
             raise LookupError(f"note not found: {note_id}")
         return note
 
+    def delete(self, note_id: str, *, project: str | None = None) -> NoteRecord:
+        self._require_non_empty(note_id, "id")
+        deleted = self._repository.delete(note_id, project=project or self._project)
+        if deleted is None:
+            raise LookupError(f"note not found: {note_id}")
+        return deleted
+
     def search(
         self,
         query: str,

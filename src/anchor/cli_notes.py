@@ -187,3 +187,33 @@ def notes_search(
         emit_error("notes", "INVALID_ARGS", str(exc))
     except Exception as exc:
         emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
+
+
+@notes_app.command(name="delete")
+def notes_delete(
+    note_id: Annotated[str, typer.Option("--id")],
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+) -> None:
+    try:
+        container = build_container(profile=profile)
+        resolved_project = resolve_project(container, project)
+        result = container.notes_service.delete(note_id, project=resolved_project)
+        typer.echo(
+            json.dumps(
+                build_success_payload(
+                    "notes.delete",
+                    {"note": result.model_dump()},
+                    container,
+                    extra_meta={"project": resolved_project},
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    except LookupError as exc:
+        emit_error("notes", "NOT_FOUND", str(exc))
+    except ValueError as exc:
+        emit_error("notes", "INVALID_ARGS", str(exc))
+    except Exception as exc:
+        emit_error("notes", "DB_MIGRATION_FAILED", str(exc))

@@ -160,6 +160,56 @@ class SqliteNotesRepository(SqliteRepositoryBase):
             raise RuntimeError("updated note could not be reloaded")
         return updated
 
+    def delete(self, note_id: str, *, project: str) -> NoteRecord | None:
+        current = self.get(note_id, project=project)
+        if current is None:
+            return None
+        now = utc_now_iso()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE documents
+                SET deleted_at = ?, updated_at = ?
+                WHERE id = ? AND project = ? AND document_type = 'note' AND deleted_at IS NULL
+                """,
+                (now, now, note_id, project),
+            )
+            connection.execute(
+                """
+                UPDATE notes
+                SET archived_at = ?
+                WHERE document_id = ? AND project = ?
+                """,
+                (now, note_id, project),
+            )
+            connection.execute(
+                """
+                DELETE FROM document_chunks_fts
+                WHERE document_type = 'note' AND document_id = ?
+                """,
+                (note_id,),
+            )
+            connection.execute(
+                """
+                DELETE FROM chunk_embeddings
+                WHERE chunk_id IN (
+                    SELECT id
+                    FROM document_chunks
+                    WHERE document_id = ?
+                )
+                """,
+                (note_id,),
+            )
+            connection.execute(
+                """
+                DELETE FROM document_chunks
+                WHERE document_id = ?
+                """,
+                (note_id,),
+            )
+            connection.commit()
+        return current
+
     def list(self, limit: int, *, project: str) -> list[NoteRecord]:
         with self._connect() as connection:
             rows = connection.execute(

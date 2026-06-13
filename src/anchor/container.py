@@ -11,6 +11,7 @@ from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.notes.service import NotesService
 from anchor.application.retrieval.document_chunking import DocumentChunkingService
 from anchor.application.retrieval.rerank_service import RerankService
+from anchor.application.retrieval.search_service import SearchService
 from anchor.application.system.config_service import ConfigService
 from anchor.application.system.health_service import HealthService
 from anchor.application.system.migration_service import MigrationService
@@ -28,6 +29,7 @@ class Container:
     migration_service: MigrationService
     notes_service: NotesService
     tasks_service: TasksService
+    search_service: SearchService
 
 
 def build_container(profile: str | None = None, auto_migrate: bool = True) -> Container:
@@ -67,6 +69,11 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         project=config.runtime.default_project,
         budget_tokens=config.runtime.default_budget_tokens,
     )
+    search_service = SearchService(
+        notes_service=notes_service,
+        tasks_service=tasks_service,
+        budget_tokens=config.runtime.default_budget_tokens,
+    )
     if auto_migrate:
         migration_service.migrate()
     return Container(
@@ -78,4 +85,5 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         migration_service=migration_service,
         notes_service=notes_service,
         tasks_service=tasks_service,
+        search_service=search_service,
     )

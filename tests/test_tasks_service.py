@@ -119,6 +119,14 @@ class FakeTasksRepository:
             )
         ][:limit]
 
+    def delete(self, task_id: str, *, project: str) -> TaskRecord | None:
+        del project
+        if self.created is None or self.created.id != task_id:
+            return None
+        deleted = self.created
+        self.created = None
+        return deleted
+
 
 class BudgetedTasksRepository(FakeTasksRepository):
     def search(self, query: str, limit: int, *, project: str):
@@ -221,3 +229,15 @@ class TasksServiceTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             service.add(title=" ", body="text")
+
+    def test_delete_removes_task(self) -> None:
+        repo = FakeTasksRepository()
+        service = TasksService(repository=repo, project="workspace")
+
+        service.add(title="Ship tasks", body="Implement task slice", project="repo-a")
+        deleted = service.delete("task_1", project="repo-a")
+
+        self.assertEqual(deleted.id, "task_1")
+        self.assertIsNone(repo.created)
+        with self.assertRaises(LookupError):
+            service.done("task_1", project="repo-a")
