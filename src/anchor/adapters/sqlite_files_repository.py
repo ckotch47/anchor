@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.adapters.sqlite_repository import SqliteRepositoryBase
@@ -231,18 +232,38 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             return None
         return self._row_to_record(row)
 
-    def list_indexed_files(self, *, project: str) -> list[IndexedFileRecord]:
+    def list_indexed_files(
+        self,
+        *,
+        project: str,
+        root_path: str | None = None,
+        language: str | None = None,
+        path_prefix: str | None = None,
+        limit: int | None = None,
+    ) -> list[IndexedFileRecord]:
+        clauses = ["project = ?", "deleted_at IS NULL"]
+        params: list[Any] = [project]
+        if root_path is not None:
+            clauses.append("root_path = ?")
+            params.append(root_path)
+        if language is not None:
+            clauses.append("lower(language) = ?")
+            params.append(language.lower())
+        if path_prefix is not None:
+            clauses.append("path LIKE ? ESCAPE '\\'")
+            params.append(f"{self._escape_like(path_prefix)}%")
+        query = (
+            "SELECT document_id, project, path, root_path, language, metatags, file_size, content_hash, mtime_ns, "
+            "created_at, updated_at, deleted_at "
+            "FROM indexed_files "
+            f"WHERE {' AND '.join(clauses)} "
+            "ORDER BY path ASC"
+        )
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
         with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT document_id, project, path, root_path, language, metatags, file_size, content_hash, mtime_ns,
-                       created_at, updated_at, deleted_at
-                FROM indexed_files
-                WHERE project = ? AND deleted_at IS NULL
-                ORDER BY path ASC
-                """,
-                (project,),
-            ).fetchall()
+            rows = connection.execute(query, params).fetchall()
         return [self._row_to_record(row) for row in rows]
 
     def list_chunks(self, document_id: str) -> list[FileChunkRecord]:
@@ -363,8 +384,24 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             )
             connection.commit()
 
-    def search(self, query: str, limit: int, *, project: str) -> list[FileSearchHit]:
-        candidates = self.search_lexical_candidates(query=query, limit=limit, project=project)
+    def search(
+        self,
+        query: str,
+        limit: int,
+        *,
+        project: str,
+        root_path: str | None = None,
+        language: str | None = None,
+        path_prefix: str | None = None,
+    ) -> list[FileSearchHit]:
+        candidates = self.search_lexical_candidates(
+            query=query,
+            limit=limit,
+            project=project,
+            root_path=root_path,
+            language=language,
+            path_prefix=path_prefix,
+        )
         return [
             FileSearchHit(
                 file=candidate.file,
@@ -379,8 +416,18 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             for candidate in candidates[:limit]
         ]
 
-    def search_lexical_candidates(self, query: str, limit: int, *, project: str) -> list[FileSearchCandidate]:
+    def search_lexical_candidates(
+        self,
+        query: str,
+        limit: int,
+        *,
+        project: str,
+        root_path: str | None = None,
+        language: str | None = None,
+        path_prefix: str | None = None,
+    ) -> list[FileSearchCandidate]:
         match_query = normalize_fts5_query(query)
+        filters_sql, filter_params = self._file_filter_clauses(root_path=root_path, language=language, path_prefix=path_prefix)
         with self._connect() as connection:
             rows = connection.execute(
                 """
@@ -409,10 +456,13 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                   AND d.document_type = ?
                   AND d.project = ?
                   AND d.deleted_at IS NULL
+                  """
+                + filters_sql
+                + """
                 ORDER BY bm25(file_chunks_fts), f.updated_at DESC
                 LIMIT ?
                 """,
-                ("file", match_query, "file", project, limit),
+                ("file", match_query, "file", project, *filter_params, limit),
             ).fetchall()
         return [
             FileSearchCandidate(
@@ -439,7 +489,11 @@ class SqliteFilesRepository(SqliteRepositoryBase):
         limit: int,
         *,
         project: str,
+        root_path: str | None = None,
+        language: str | None = None,
+        path_prefix: str | None = None,
     ) -> list[FileSearchCandidate]:
+        filters_sql, filter_params = self._file_filter_clauses(root_path=root_path, language=language, path_prefix=path_prefix)
         with self._connect() as connection:
             if ensure_vector_index(connection, table="chunk_embeddings", column="embedding", dimension=len(query_embedding)):
                 rows = connection.execute(
@@ -466,10 +520,13 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                     WHERE d.document_type = ?
                       AND d.project = ?
                       AND d.deleted_at IS NULL
+                      """
+                    + filters_sql
+                    + """
                     ORDER BY v.distance ASC
                     LIMIT ?
                     """,
-                    (json.dumps(query_embedding, separators=(",", ":")), "file", project, limit),
+                    (json.dumps(query_embedding, separators=(",", ":")), "file", project, *filter_params, limit),
                 ).fetchall()
                 candidates = [
                     FileSearchCandidate(
@@ -520,8 +577,11 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                 WHERE d.document_type = ?
                   AND d.project = ?
                   AND d.deleted_at IS NULL
+                  """
+                + filters_sql
+                + """
                 """,
-                ("file", project),
+                ("file", project, *filter_params),
             ).fetchall()
         candidates: list[FileSearchCandidate] = []
         for row in rows:
@@ -639,3 +699,28 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             if isinstance(parsed, list):
                 return [float(value) for value in parsed]
         return []
+
+    @staticmethod
+    def _escape_like(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    @classmethod
+    def _file_filter_clauses(
+        cls,
+        *,
+        root_path: str | None = None,
+        language: str | None = None,
+        path_prefix: str | None = None,
+    ) -> tuple[str, list[Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if root_path is not None:
+            clauses.append("AND f.root_path = ?")
+            params.append(root_path)
+        if language is not None:
+            clauses.append("AND lower(f.language) = ?")
+            params.append(language.lower())
+        if path_prefix is not None:
+            clauses.append("AND f.path LIKE ? ESCAPE '\\'")
+            params.append(f"{cls._escape_like(path_prefix)}%")
+        return ("\n" + "\n".join(clauses) if clauses else ""), params

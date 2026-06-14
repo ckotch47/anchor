@@ -166,17 +166,14 @@ class FilesService:
         resolved_project = project or self._project
         resolved_root = self._normalize_root(root)
         resolved_language = self._normalize_language(language)
-        resolved_path_prefix = self._normalize_path_prefix(path_prefix)
-        files = [
-            file
-            for file in self._repository.list_indexed_files(project=resolved_project)
-            if self._file_matches_filters(
-                file,
-                root=resolved_root,
-                language=resolved_language,
-                path_prefix=resolved_path_prefix,
-            )
-        ][:limit]
+        resolved_path_prefix = self._normalize_path_prefix(path_prefix, resolved_root)
+        files = self._repository.list_indexed_files(
+            project=resolved_project,
+            root_path=resolved_root,
+            language=resolved_language,
+            path_prefix=resolved_path_prefix,
+            limit=limit,
+        )
         return FilesListResult(
             count=len(files),
             files=files if view == "full" else [compact_file_item(file) for file in files],
@@ -197,9 +194,12 @@ class FilesService:
         resolved_project = project or self._project
         resolved_root = self._normalize_root(root)
         resolved_language = self._normalize_language(language)
-        resolved_path_prefix = self._normalize_path_prefix(path_prefix)
+        resolved_path_prefix = self._normalize_path_prefix(path_prefix, resolved_root)
         if path is not None and path.strip():
-            record = self._repository.get_by_path(project=resolved_project, path=path)
+            record = self._repository.get_by_path(
+                project=resolved_project,
+                path=self._normalize_scoped_path(path, resolved_root),
+            )
         else:
             record = self._repository.get(file_id or "", project=resolved_project)
         if record is None:
@@ -232,7 +232,7 @@ class FilesService:
         resolved_project = project or self._project
         resolved_root = self._normalize_root(root)
         resolved_language = self._normalize_language(language)
-        resolved_path_prefix = self._normalize_path_prefix(path_prefix)
+        resolved_path_prefix = self._normalize_path_prefix(path_prefix, resolved_root)
         self._drain_pending_embeddings(resolved_project)
         candidate_limit = max(limit * 4, limit)
         candidates = self._collect_candidates(
@@ -330,7 +330,14 @@ class FilesService:
         language: str | None = None,
         path_prefix: str | None = None,
     ) -> list[FileSearchCandidate]:
-        lexical_rows = self._repository.search_lexical_candidates(query=query, limit=limit, project=project)
+        lexical_rows = self._repository.search_lexical_candidates(
+            query=query,
+            limit=limit,
+            project=project,
+            root_path=root,
+            language=language,
+            path_prefix=path_prefix,
+        )
         semantic_rows: list[FileSearchCandidate] = []
         if self._embedding_service is not None:
             try:
@@ -339,6 +346,9 @@ class FilesService:
                     query_embedding=query_embedding,
                     limit=limit,
                     project=project,
+                    root_path=root,
+                    language=language,
+                    path_prefix=path_prefix,
                 )
             except Exception:
                 semantic_rows = []
@@ -477,10 +487,22 @@ class FilesService:
         return language.strip().lower()
 
     @staticmethod
-    def _normalize_path_prefix(path_prefix: str | None) -> str | None:
+    def _normalize_path_prefix(path_prefix: str | None, root: str | None = None) -> str | None:
         if path_prefix is None or not path_prefix.strip():
             return None
-        return Path(path_prefix).expanduser().resolve().as_posix()
+        candidate = Path(path_prefix).expanduser()
+        if candidate.is_absolute():
+            return candidate.resolve().as_posix()
+        base = Path(root).expanduser() if root is not None else Path.cwd()
+        return (base / candidate).resolve().as_posix()
+
+    @staticmethod
+    def _normalize_scoped_path(path: str, root: str | None) -> str:
+        candidate = Path(path).expanduser()
+        if candidate.is_absolute():
+            return candidate.resolve().as_posix()
+        base = Path(root).expanduser() if root is not None else Path.cwd()
+        return (base / candidate).resolve().as_posix()
 
     @staticmethod
     def _file_matches_filters(

@@ -83,10 +83,41 @@ class FilesServiceTest(unittest.TestCase):
         self.assertEqual(result.file.id, FILE_ID)
         self.assertEqual(result.file.path, "/repo/app.py")
 
+    def test_get_normalizes_relative_path_against_root(self) -> None:
+        class FakeRepository:
+            def get(self, document_id: str, *, project: str):
+                del document_id, project
+                return None
+
+            def get_by_path(self, *, project: str, path: str):
+                del project
+                if path != "/repo/app.py":
+                    return None
+                return IndexedFileRecord(
+                    id=FILE_ID,
+                    project="repo-a",
+                    metatags={},
+                    path="/repo/app.py",
+                    root_path="/repo",
+                    language="python",
+                    file_size=42,
+                    content_hash="hash",
+                    mtime_ns=1,
+                    created_at="2026-06-13T00:00:00+00:00",
+                    updated_at="2026-06-13T00:00:00+00:00",
+                    deleted_at=None,
+                )
+
+        service = FilesService(repository=FakeRepository(), chunking_service=FileChunkingService(), project="repo-a")
+
+        result = service.get(path="app.py", root="/repo", project="repo-a")
+
+        self.assertEqual(result.file.path, "/repo/app.py")
+
     def test_list_returns_compact_file_items(self) -> None:
         class FakeRepository:
-            def list_indexed_files(self, *, project: str):
-                del project
+            def list_indexed_files(self, *, project: str, root_path: str | None = None, language: str | None = None, path_prefix: str | None = None, limit: int | None = None):
+                del project, root_path, language, path_prefix, limit
                 return [
                     FileListItem(
                         id=FILE_ID,
@@ -111,36 +142,57 @@ class FilesServiceTest(unittest.TestCase):
 
     def test_list_applies_filters(self) -> None:
         class FakeRepository:
-            def list_indexed_files(self, *, project: str):
-                del project
+            def list_indexed_files(
+                self,
+                *,
+                project: str,
+                root_path: str | None = None,
+                language: str | None = None,
+                path_prefix: str | None = None,
+                limit: int | None = None,
+            ):
+                del project, limit
+                if root_path == "/repo" and language == "python" and path_prefix == "/repo/app":
+                    return [
+                        FileListItem(
+                            id=FILE_ID,
+                            path="/repo/app.py",
+                            root_path="/repo",
+                            language="python",
+                            file_size=42,
+                        )
+                    ]
                 return [
-                    FileListItem(
-                        id=FILE_ID,
-                        path="/repo/app.py",
-                        root_path="/repo",
-                        language="python",
-                        file_size=42,
-                    ),
                     FileListItem(
                         id=uuid7_str(),
                         path="/repo/app.md",
                         root_path="/repo",
                         language="markdown",
                         file_size=24,
-                    ),
+                    )
                 ]
 
         service = FilesService(repository=FakeRepository(), chunking_service=FileChunkingService(), project="repo-a")
 
-        result = service.list(project="repo-a", language="python")
+        result = service.list(project="repo-a", root="/repo", language="python", path_prefix="app")
 
         self.assertEqual(result.count, 1)
         self.assertEqual(result.files[0].language, "python")
+        self.assertEqual(result.files[0].path, "/repo/app.py")
 
     def test_search_uses_vector_and_rerank(self) -> None:
         class FakeRepository:
-            def search_lexical_candidates(self, query: str, limit: int, *, project: str):
-                del query, limit, project
+            def search_lexical_candidates(
+                self,
+                query: str,
+                limit: int,
+                *,
+                project: str,
+                root_path: str | None = None,
+                language: str | None = None,
+                path_prefix: str | None = None,
+            ):
+                del query, limit, project, root_path, language, path_prefix
                 return [
                     FileSearchCandidate(
                         file=FileListItem(
@@ -157,8 +209,17 @@ class FilesServiceTest(unittest.TestCase):
                     )
                 ]
 
-            def search_vector_candidates(self, query_embedding: list[float], limit: int, *, project: str):
-                del query_embedding, limit, project
+            def search_vector_candidates(
+                self,
+                query_embedding: list[float],
+                limit: int,
+                *,
+                project: str,
+                root_path: str | None = None,
+                language: str | None = None,
+                path_prefix: str | None = None,
+            ):
+                del query_embedding, limit, project, root_path, language, path_prefix
                 return [
                     FileSearchCandidate(
                         file=FileListItem(
@@ -205,8 +266,17 @@ class FilesServiceTest(unittest.TestCase):
 
     def test_search_explain_returns_stats(self) -> None:
         class FakeRepository:
-            def search_lexical_candidates(self, query: str, limit: int, *, project: str):
-                del query, limit, project
+            def search_lexical_candidates(
+                self,
+                query: str,
+                limit: int,
+                *,
+                project: str,
+                root_path: str | None = None,
+                language: str | None = None,
+                path_prefix: str | None = None,
+            ):
+                del query, limit, project, root_path, language, path_prefix
                 return [
                     FileSearchCandidate(
                         file=FileListItem(
@@ -223,8 +293,17 @@ class FilesServiceTest(unittest.TestCase):
                     )
                 ]
 
-            def search_vector_candidates(self, query_embedding: list[float], limit: int, *, project: str):
-                del query_embedding, limit, project
+            def search_vector_candidates(
+                self,
+                query_embedding: list[float],
+                limit: int,
+                *,
+                project: str,
+                root_path: str | None = None,
+                language: str | None = None,
+                path_prefix: str | None = None,
+            ):
+                del query_embedding, limit, project, root_path, language, path_prefix
                 return []
 
         service = FilesService(
@@ -237,6 +316,62 @@ class FilesServiceTest(unittest.TestCase):
 
         self.assertIsNotNone(result.stats)
         self.assertEqual(result.stats["returned_count"], 1)
+
+    def test_search_normalizes_relative_filters_against_root(self) -> None:
+        captured: dict[str, str | None] = {}
+
+        class FakeRepository:
+            def search_lexical_candidates(
+                self,
+                query: str,
+                limit: int,
+                *,
+                project: str,
+                root_path: str | None = None,
+                language: str | None = None,
+                path_prefix: str | None = None,
+            ):
+                del query, limit, project
+                captured["root_path"] = root_path
+                captured["language"] = language
+                captured["path_prefix"] = path_prefix
+                return [
+                    FileSearchCandidate(
+                        file=FileListItem(
+                            id=FILE_ID,
+                            path="/repo/src/app.py",
+                            root_path="/repo",
+                            language="python",
+                            file_size=42,
+                        ),
+                        chunk_id=FILE_CHUNK_ID,
+                        snippet="lexical snippet",
+                        token_count=2,
+                        lexical_score=0.2,
+                    )
+                ]
+
+            def search_vector_candidates(
+                self,
+                query_embedding: list[float],
+                limit: int,
+                *,
+                project: str,
+                root_path: str | None = None,
+                language: str | None = None,
+                path_prefix: str | None = None,
+            ):
+                del query_embedding, limit, project, root_path, language, path_prefix
+                return []
+
+        service = FilesService(repository=FakeRepository(), chunking_service=FileChunkingService(), project="repo-a")
+
+        result = service.search("deploy", project="repo-a", root="/repo", language="python", path_prefix="src")
+
+        self.assertEqual(result.count, 1)
+        self.assertEqual(captured["root_path"], "/repo")
+        self.assertEqual(captured["language"], "python")
+        self.assertEqual(captured["path_prefix"], "/repo/src")
 
     def test_index_and_search_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

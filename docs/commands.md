@@ -346,6 +346,7 @@ anchor files index --root ./repo --project repo-a
 - Returns the full indexed file record for one file by `--id` or `--path`.
 - Use `--project` to scope the lookup to a repository or workspace.
 - `--root`, `--language`, and `--path-prefix` narrow the lookup when agents know the file slice they want.
+- Relative `--path` and `--path-prefix` values resolve against `--root` when it is provided, otherwise against the current working directory.
 - `--view` is accepted for transport parity, but the command always returns the full file record.
 
 Example:
@@ -360,6 +361,7 @@ anchor files get --path ./repo/app.py --project repo-a
 - Emits a compact navigation record by default; `--view full` expands each row to the full indexed file record.
 - Use `--limit` to keep the response small when the repository is large.
 - `--root`, `--language`, and `--path-prefix` narrow the list before pagination.
+- The repository applies those filters in SQLite before rows are materialized, so the command does not load the full project file set first.
 
 Example:
 
@@ -375,6 +377,7 @@ anchor files list --limit 10 --project repo-a
 - The vector layer is initialized from the shared connection lifecycle, not a separate index daemon.
 - Uses the configured project scope by default.
 - `--root`, `--language`, and `--path-prefix` narrow the candidate pool before rerank and budget trim.
+- Relative `--path` and `--path-prefix` values resolve against `--root` when it is provided, otherwise against the current working directory.
 - `--explain` adds retrieval stats to the machine response so agents can see candidate and dedup counts.
 - `--view full` expands each hit to the full indexed file record.
 
