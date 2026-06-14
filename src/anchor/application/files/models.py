@@ -1,8 +1,25 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
+
+from anchor.application.files.chunking import FileChunkDraft
+
+
+@dataclass(frozen=True)
+class FileIndexDraft:
+    document_id: str
+    project: str
+    path: str
+    root_path: str
+    language: str
+    metatags: dict[str, Any]
+    file_size: int
+    content_hash: str
+    mtime_ns: int
+    chunks: list[FileChunkDraft]
 
 
 class IndexedFileRecord(BaseModel):
@@ -74,6 +91,7 @@ class FilesGetResult(BaseModel):
 class FilesListResult(BaseModel):
     count: int
     files: list[IndexedFileRecord | FileListItem]
+    next_cursor: str | None = None
 
 
 class FilesSearchResult(BaseModel):

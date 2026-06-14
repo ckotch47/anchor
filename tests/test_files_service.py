@@ -166,8 +166,19 @@ class FilesServiceTest(unittest.TestCase):
 
     def test_list_returns_compact_file_items(self) -> None:
         class FakeRepository:
-            def list_indexed_files(self, *, project: str, root_path: str | None = None, language: str | None = None, path_prefix: str | None = None, limit: int | None = None):
-                del project, root_path, language, path_prefix, limit
+            def list_indexed_files(
+                self,
+                *,
+                project: str,
+                root_path: str | None = None,
+                root_paths: list[str] | None = None,
+                language: str | None = None,
+                path_prefix: str | None = None,
+                cursor_path: str | None = None,
+                cursor_id: str | None = None,
+                limit: int | None = None,
+            ):
+                del project, root_path, root_paths, language, path_prefix, cursor_path, cursor_id, limit
                 return [
                     FileListItem(
                         id=FILE_ID,
@@ -190,6 +201,54 @@ class FilesServiceTest(unittest.TestCase):
         self.assertEqual(result.files[0].id, FILE_ID)
         self.assertEqual(result.files[0].path, "/repo/app.py")
 
+    def test_list_supports_cursor_pagination(self) -> None:
+        first_file = FileListItem(
+            id=FILE_ID,
+            path="/repo/a.py",
+            root_path="/repo",
+            language="python",
+            file_size=11,
+        )
+        second_file = FileListItem(
+            id=uuid7_str(),
+            path="/repo/b.py",
+            root_path="/repo",
+            language="python",
+            file_size=22,
+        )
+
+        class FakeRepository:
+            def list_indexed_files(
+                self,
+                *,
+                project: str,
+                root_path: str | None = None,
+                root_paths: list[str] | None = None,
+                language: str | None = None,
+                path_prefix: str | None = None,
+                cursor_id: str | None = None,
+                limit: int | None = None,
+            ):
+                del project, root_path, root_paths, language, path_prefix
+                if cursor_id is None and limit == 2:
+                    return [first_file, second_file]
+                if cursor_id == first_file.id and limit == 2:
+                    return [second_file]
+                return []
+
+        service = FilesService(repository=FakeRepository(), chunking_service=FileChunkingService(), project="repo-a")
+
+        first_page = service.list(project="repo-a", limit=1)
+        second_page = service.list(project="repo-a", limit=1, cursor=first_page.next_cursor)
+
+        self.assertEqual(first_page.count, 1)
+        self.assertIsNotNone(first_page.next_cursor)
+        self.assertEqual(service._decode_cursor(first_page.next_cursor), first_page.files[0].id)
+        self.assertEqual(first_page.files[0].path, "/repo/a.py")
+        self.assertEqual(second_page.count, 1)
+        self.assertIsNone(second_page.next_cursor)
+        self.assertEqual(second_page.files[0].path, "/repo/b.py")
+
     def test_list_applies_filters(self) -> None:
         class FakeRepository:
             def list_indexed_files(
@@ -197,11 +256,14 @@ class FilesServiceTest(unittest.TestCase):
                 *,
                 project: str,
                 root_path: str | None = None,
+                root_paths: list[str] | None = None,
                 language: str | None = None,
                 path_prefix: str | None = None,
+                cursor_path: str | None = None,
+                cursor_id: str | None = None,
                 limit: int | None = None,
             ):
-                del project, limit
+                del project, root_paths, cursor_path, cursor_id, limit
                 if root_path == "/repo" and language == "python" and path_prefix == "/repo/app":
                     return [
                         FileListItem(
@@ -229,6 +291,132 @@ class FilesServiceTest(unittest.TestCase):
         self.assertEqual(result.count, 1)
         self.assertEqual(result.files[0].language, "python")
         self.assertEqual(result.files[0].path, "/repo/app.py")
+
+    def test_index_cleans_up_roots_in_batches(self) -> None:
+        captured: dict[str, list[str] | None] = {"root_paths": None}
+
+        class FakeRepository:
+            def __init__(self) -> None:
+                self.deleted: list[str] = []
+
+            def upsert_files(self, files):
+                del files
+                return None
+
+            def get_by_path(self, *, project: str, path: str):
+                del project, path
+                return None
+
+            def list_indexed_files(
+                self,
+                *,
+                project: str,
+                root_path: str | None = None,
+                root_paths: list[str] | None = None,
+                language: str | None = None,
+                path_prefix: str | None = None,
+                cursor_path: str | None = None,
+                cursor_id: str | None = None,
+                limit: int | None = None,
+            ):
+                del project, root_path, language, path_prefix, cursor_path, cursor_id, limit
+                captured["root_paths"] = root_paths
+                return [
+                    IndexedFileRecord(
+                        id=uuid7_str(),
+                        project="repo-a",
+                        metatags={},
+                        path="/tmp/stale.py",
+                        root_path="/tmp",
+                        language="python",
+                        file_size=1,
+                        content_hash="hash",
+                        mtime_ns=1,
+                        created_at="2026-06-13T00:00:00+00:00",
+                        updated_at="2026-06-13T00:00:00+00:00",
+                        deleted_at=None,
+                    )
+                ]
+
+            def delete(self, document_id: str, *, project: str):
+                del project
+                self.deleted.append(document_id)
+                return None
+
+        class FakeChunkingService:
+            def chunk_file(self, *, path: Path, text: str, language: str, chunk_size: int, chunk_overlap: int):
+                del path, text, language, chunk_size, chunk_overlap
+                return []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root_one = Path(tmpdir) / "repo-one"
+            root_two = Path(tmpdir) / "repo-two"
+            root_one.mkdir()
+            root_two.mkdir()
+            (root_one / "keep.py").write_text("print('keep')\n", encoding="utf-8")
+
+            service = FilesService(
+                repository=FakeRepository(),
+                chunking_service=FakeChunkingService(),
+                project="repo-a",
+                roots=[str(root_one), str(root_two)],
+            )
+
+            service.index(project="repo-a")
+
+        self.assertEqual(captured["root_paths"], [root_one.resolve().as_posix(), root_two.resolve().as_posix()])
+
+    def test_index_writes_files_in_batches_of_100(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            for index in range(101):
+                (root / f"file-{index}.py").write_text(f"print({index})\n", encoding="utf-8")
+
+            batch_sizes: list[int] = []
+
+            class FakeRepository:
+                def upsert_files(self, files):
+                    batch_sizes.append(len(files))
+
+                def get_by_path(self, *, project: str, path: str):
+                    del project, path
+                    return None
+
+                def list_indexed_files(
+                    self,
+                    *,
+                    project: str,
+                    root_path: str | None = None,
+                    root_paths: list[str] | None = None,
+                    language: str | None = None,
+                    path_prefix: str | None = None,
+                    cursor_path: str | None = None,
+                    cursor_id: str | None = None,
+                    limit: int | None = None,
+                ):
+                    del project, root_path, root_paths, language, path_prefix, cursor_path, cursor_id, limit
+                    return []
+
+                def delete(self, document_id: str, *, project: str):
+                    del document_id, project
+                    return None
+
+            class FakeChunkingService:
+                def chunk_file(self, *, path: Path, text: str, language: str, chunk_size: int, chunk_overlap: int):
+                    del path, text, language, chunk_size, chunk_overlap
+                    return []
+
+            service = FilesService(
+                repository=FakeRepository(),
+                chunking_service=FakeChunkingService(),
+                project="repo-a",
+                roots=[str(root)],
+            )
+
+            service.index(project="repo-a")
+
+        self.assertEqual(batch_sizes, [100, 1])
 
     def test_search_uses_vector_and_rerank(self) -> None:
         class FakeRepository:

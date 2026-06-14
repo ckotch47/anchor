@@ -11,12 +11,14 @@ from anchor.adapters.sqlite_support import utc_now_iso
 from anchor.adapters.sqlite_vector_support import (
     cosine_distance_to_score,
     ensure_vector_index,
+    require_vector_extension_for_large_python_fallback,
     try_load_sqlite_vector_extension,
 )
 from anchor.application.embeddings.models import ChunkEmbeddingRecord
 from anchor.application.files.chunking import FileChunkDraft
 from anchor.application.files.models import (
     FileChunkRecord,
+    FileIndexDraft,
     FileListItem,
     FileSearchCandidate,
     FileSearchHit,
@@ -48,107 +50,22 @@ class SqliteFilesRepository(SqliteRepositoryBase):
         chunks: list[FileChunkDraft],
     ) -> IndexedFileRecord:
         now = utc_now_iso()
-        serialized_metatags = self._serialize_metatags(metatags)
-        title = Path(path).name
-        with self._connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO documents (
-                    id, project, metatags, document_type, title, body, source, source_ref, created_at, updated_at, deleted_at
+        self.upsert_files(
+            [
+                FileIndexDraft(
+                    document_id=document_id,
+                    project=project,
+                    path=path,
+                    root_path=root_path,
+                    language=language,
+                    metatags=metatags,
+                    file_size=file_size,
+                    content_hash=content_hash,
+                    mtime_ns=mtime_ns,
+                    chunks=chunks,
                 )
-                VALUES (?, ?, ?, 'file', ?, ?, 'filesystem', ?, ?, ?, NULL)
-                ON CONFLICT(id) DO UPDATE SET
-                    project = excluded.project,
-                    metatags = excluded.metatags,
-                    document_type = 'file',
-                    title = excluded.title,
-                    body = excluded.body,
-                    source = excluded.source,
-                    source_ref = excluded.source_ref,
-                    updated_at = excluded.updated_at,
-                    deleted_at = NULL
-                """,
-                (document_id, project, serialized_metatags, title, path, path, now, now),
-            )
-            connection.execute(
-                """
-                INSERT INTO indexed_files (
-                    document_id, project, path, root_path, language, metatags, file_size,
-                    content_hash, mtime_ns, created_at, updated_at, deleted_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-                ON CONFLICT(document_id) DO UPDATE SET
-                    project = excluded.project,
-                    path = excluded.path,
-                    root_path = excluded.root_path,
-                    language = excluded.language,
-                    metatags = excluded.metatags,
-                    file_size = excluded.file_size,
-                    content_hash = excluded.content_hash,
-                    mtime_ns = excluded.mtime_ns,
-                    updated_at = excluded.updated_at,
-                    deleted_at = NULL
-                """,
-                (
-                    document_id,
-                    project,
-                    path,
-                    root_path,
-                    language,
-                    serialized_metatags,
-                    file_size,
-                    content_hash,
-                    mtime_ns,
-                    now,
-                    now,
-                ),
-            )
-            connection.execute(
-                """
-                DELETE FROM chunk_embeddings
-                WHERE chunk_id IN (
-                    SELECT id
-                    FROM file_chunks
-                    WHERE document_id = ?
-                )
-                """,
-                (document_id,),
-            )
-            connection.execute("DELETE FROM file_chunks_fts WHERE document_id = ?", (document_id,))
-            connection.execute("DELETE FROM file_chunks WHERE document_id = ?", (document_id,))
-            for chunk in chunks:
-                chunk_id = uuid7_str()
-                connection.execute(
-                    """
-                    INSERT INTO file_chunks (
-                        id, document_id, project, path, root_path, language, chunk_index,
-                        start_line, end_line, chunk_text, token_count, created_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        chunk_id,
-                        document_id,
-                        project,
-                        path,
-                        root_path,
-                        language,
-                        chunk.chunk_index,
-                        chunk.start_line,
-                        chunk.end_line,
-                        chunk.chunk_text,
-                        chunk.token_count,
-                        now,
-                    ),
-                )
-                connection.execute(
-                    """
-                    INSERT INTO file_chunks_fts (document_type, document_id, chunk_id, path, chunk_text)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    ("file", document_id, chunk_id, path, chunk.chunk_text),
-                )
-            connection.commit()
+            ]
+        )
         return self.get(document_id, project=project) or IndexedFileRecord(
             id=document_id,
             project=project,
@@ -163,6 +80,15 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             updated_at=now,
             deleted_at=None,
         )
+
+    def upsert_files(self, files: list[FileIndexDraft]) -> None:
+        if not files:
+            return
+        now = utc_now_iso()
+        with self._connect() as connection:
+            for file in files:
+                self._upsert_file_in_connection(connection, file, now=now)
+            connection.commit()
 
     def delete(self, document_id: str, *, project: str) -> IndexedFileRecord | None:
         current = self.get(document_id, project=project)
@@ -237,27 +163,47 @@ class SqliteFilesRepository(SqliteRepositoryBase):
         *,
         project: str,
         root_path: str | None = None,
+        root_paths: list[str] | None = None,
         language: str | None = None,
         path_prefix: str | None = None,
+        cursor_path: str | None = None,
+        cursor_id: str | None = None,
         limit: int | None = None,
     ) -> list[IndexedFileRecord]:
+        if root_path is not None and root_paths is not None:
+            raise ValueError("list_indexed_files accepts either root_path or root_paths, not both")
         clauses = ["project = ?", "deleted_at IS NULL"]
         params: list[Any] = [project]
         if root_path is not None:
             clauses.append("root_path = ?")
             params.append(root_path)
+        elif root_paths is not None:
+            if not root_paths:
+                return []
+            placeholders = ", ".join("?" for _ in root_paths)
+            clauses.append(f"root_path IN ({placeholders})")
+            params.extend(root_paths)
         if language is not None:
             clauses.append("language = ?")
             params.append(language)
         if path_prefix is not None:
-            clauses.append("path LIKE ? ESCAPE '\\'")
-            params.append(f"{self._escape_like(path_prefix)}%")
+            lower_bound, upper_bound = self._path_prefix_bounds(path_prefix)
+            if lower_bound is None or upper_bound is None:
+                clauses.append("path LIKE ? ESCAPE '\\'")
+                params.append(f"{self._escape_like(path_prefix)}%")
+            else:
+                clauses.append("path >= ?")
+                clauses.append("path < ?")
+                params.extend([lower_bound, upper_bound])
+        if cursor_id is not None:
+            clauses.append("document_id > ?")
+            params.append(cursor_id)
         query = (
             "SELECT document_id, project, path, root_path, language, metatags, file_size, content_hash, mtime_ns, "
             "created_at, updated_at, deleted_at "
             "FROM indexed_files "
             f"WHERE {' AND '.join(clauses)} "
-            "ORDER BY path ASC"
+            "ORDER BY document_id ASC"
         )
         if limit is not None:
             query += " LIMIT ?"
@@ -495,7 +441,10 @@ class SqliteFilesRepository(SqliteRepositoryBase):
     ) -> list[FileSearchCandidate]:
         filters_sql, filter_params = self._file_filter_clauses(root_path=root_path, language=language, path_prefix=path_prefix)
         with self._connect() as connection:
-            if ensure_vector_index(connection, table="chunk_embeddings", column="embedding", dimension=len(query_embedding)):
+            vector_extension_loaded = try_load_sqlite_vector_extension(connection)
+            if vector_extension_loaded and ensure_vector_index(
+                connection, table="chunk_embeddings", column="embedding", dimension=len(query_embedding)
+            ):
                 rows = connection.execute(
                     """
                     SELECT
@@ -554,6 +503,8 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                     reverse=True,
                 )
                 return candidates[:limit]
+            if not vector_extension_loaded:
+                require_vector_extension_for_large_python_fallback(connection, project=project)
             rows = connection.execute(
                 """
                 SELECT
@@ -663,6 +614,107 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             created_at=str(row["created_at"]),
         )
 
+    def _upsert_file_in_connection(self, connection: sqlite3.Connection, file: FileIndexDraft, *, now: str) -> None:
+        serialized_metatags = self._serialize_metatags(file.metatags)
+        title = Path(file.path).name
+        connection.execute(
+            """
+            INSERT INTO documents (
+                id, project, metatags, document_type, title, body, source, source_ref, created_at, updated_at, deleted_at
+            )
+            VALUES (?, ?, ?, 'file', ?, ?, 'filesystem', ?, ?, ?, NULL)
+            ON CONFLICT(id) DO UPDATE SET
+                project = excluded.project,
+                metatags = excluded.metatags,
+                document_type = 'file',
+                title = excluded.title,
+                body = excluded.body,
+                source = excluded.source,
+                source_ref = excluded.source_ref,
+                updated_at = excluded.updated_at,
+                deleted_at = NULL
+            """,
+            (file.document_id, file.project, serialized_metatags, title, file.path, file.path, now, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO indexed_files (
+                document_id, project, path, root_path, language, metatags, file_size,
+                content_hash, mtime_ns, created_at, updated_at, deleted_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(document_id) DO UPDATE SET
+                project = excluded.project,
+                path = excluded.path,
+                root_path = excluded.root_path,
+                language = excluded.language,
+                metatags = excluded.metatags,
+                file_size = excluded.file_size,
+                content_hash = excluded.content_hash,
+                mtime_ns = excluded.mtime_ns,
+                updated_at = excluded.updated_at,
+                deleted_at = NULL
+            """,
+            (
+                file.document_id,
+                file.project,
+                file.path,
+                file.root_path,
+                file.language,
+                serialized_metatags,
+                file.file_size,
+                file.content_hash,
+                file.mtime_ns,
+                now,
+                now,
+            ),
+        )
+        connection.execute(
+            """
+            DELETE FROM chunk_embeddings
+            WHERE chunk_id IN (
+                SELECT id
+                FROM file_chunks
+                WHERE document_id = ?
+            )
+            """,
+            (file.document_id,),
+        )
+        connection.execute("DELETE FROM file_chunks_fts WHERE document_id = ?", (file.document_id,))
+        connection.execute("DELETE FROM file_chunks WHERE document_id = ?", (file.document_id,))
+        for chunk in file.chunks:
+            chunk_id = uuid7_str()
+            connection.execute(
+                """
+                INSERT INTO file_chunks (
+                    id, document_id, project, path, root_path, language, chunk_index,
+                    start_line, end_line, chunk_text, token_count, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    chunk_id,
+                    file.document_id,
+                    file.project,
+                    file.path,
+                    file.root_path,
+                    file.language,
+                    chunk.chunk_index,
+                    chunk.start_line,
+                    chunk.end_line,
+                    chunk.chunk_text,
+                    chunk.token_count,
+                    now,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO file_chunks_fts (document_type, document_id, chunk_id, path, chunk_text)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("file", file.document_id, chunk_id, file.path, chunk.chunk_text),
+            )
+
     @staticmethod
     def _serialize_metatags(metatags: dict[str, object]) -> str:
         return json.dumps(metatags, ensure_ascii=False, separators=(",", ":"))
@@ -704,6 +756,17 @@ class SqliteFilesRepository(SqliteRepositoryBase):
     def _escape_like(value: str) -> str:
         return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
+    @staticmethod
+    def _path_prefix_bounds(path_prefix: str) -> tuple[str | None, str | None]:
+        if not path_prefix:
+            return None, None
+        codepoints = [ord(char) for char in path_prefix]
+        for index in range(len(codepoints) - 1, -1, -1):
+            if codepoints[index] < 0x10FFFF:
+                upper = "".join(chr(codepoints[pos]) for pos in range(index)) + chr(codepoints[index] + 1)
+                return path_prefix, upper
+        return None, None
+
     @classmethod
     def _file_filter_clauses(
         cls,
@@ -721,6 +784,12 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             clauses.append("AND f.language = ?")
             params.append(language)
         if path_prefix is not None:
-            clauses.append("AND f.path LIKE ? ESCAPE '\\'")
-            params.append(f"{cls._escape_like(path_prefix)}%")
+            lower_bound, upper_bound = cls._path_prefix_bounds(path_prefix)
+            if lower_bound is None or upper_bound is None:
+                clauses.append("AND f.path LIKE ? ESCAPE '\\'")
+                params.append(f"{cls._escape_like(path_prefix)}%")
+            else:
+                clauses.append("AND f.path >= ?")
+                clauses.append("AND f.path < ?")
+                params.extend([lower_bound, upper_bound])
         return ("\n" + "\n".join(clauses) if clauses else ""), params

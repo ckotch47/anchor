@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import base64
 import fnmatch
 import hashlib
 import json
 from collections import OrderedDict
 from pathlib import Path
+from time import monotonic
 
 from anchor.adapters.sqlite_files_repository import SqliteFilesRepository
 from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.files.chunking import FileChunkingService
 from anchor.application.files.models import (
+    FileIndexDraft,
     FileSearchCandidate,
     FileSearchHit,
     FilesGetResult,
@@ -89,6 +92,7 @@ class FilesService:
         skipped = 0
         deleted = 0
         seen_paths: set[str] = set()
+        batch: list[FileIndexDraft] = []
         for root in resolved_roots:
             if not root.exists() or not root.is_dir():
                 continue
@@ -131,26 +135,34 @@ class FilesService:
                     chunk_overlap=self._chunk_overlap,
                 )
                 document_id = existing.id if existing is not None else uuid7_str()
-                self._repository.upsert_file(
-                    document_id=document_id,
-                    project=resolved_project,
-                    path=relative_path,
-                    root_path=root.as_posix(),
-                    language=language,
-                    metatags={},
-                    file_size=stat.st_size,
-                    content_hash=content_hash,
-                    mtime_ns=stat.st_mtime_ns,
-                    chunks=chunks,
+                batch.append(
+                    FileIndexDraft(
+                        document_id=document_id,
+                        project=resolved_project,
+                        path=relative_path,
+                        root_path=root.as_posix(),
+                        language=language,
+                        metatags={},
+                        file_size=stat.st_size,
+                        content_hash=content_hash,
+                        mtime_ns=stat.st_mtime_ns,
+                        chunks=chunks,
+                    )
                 )
-                self._queue_embeddings(document_id)
                 indexed += 1
-        for root in resolved_roots:
-            root_path = root.as_posix()
-            for record in self._repository.list_indexed_files(project=resolved_project, root_path=root_path):
+                if len(batch) >= 100:
+                    self._flush_index_batch(batch)
+                    batch.clear()
+        if batch:
+            self._flush_index_batch(batch)
+            batch.clear()
+        for root_paths in self._chunk_values([root.as_posix() for root in resolved_roots], size=128):
+            for record in self._repository.list_indexed_files(project=resolved_project, root_paths=root_paths):
                 if record.path not in seen_paths:
                     self._repository.delete(record.id, project=resolved_project)
                     deleted += 1
+        if indexed > 0:
+            self._drain_pending_embeddings(resolved_project, limit=1, time_budget_seconds=0.1)
         return FilesIndexResult(count=indexed + deleted, indexed=indexed, skipped=skipped, deleted=deleted)
 
     def list(
@@ -158,6 +170,7 @@ class FilesService:
         limit: int = 20,
         *,
         project: str | None = None,
+        cursor: str | None = None,
         view: str = "compact",
         root: str | None = None,
         language: str | None = None,
@@ -169,16 +182,24 @@ class FilesService:
         resolved_root = self._normalize_root(root)
         resolved_language = self._normalize_language(language)
         resolved_path_prefix = self._normalize_path_prefix(path_prefix, resolved_root)
+        cursor_data = self._decode_cursor(cursor)
+        cursor_id = cursor_data
         files = self._repository.list_indexed_files(
             project=resolved_project,
             root_path=resolved_root,
             language=resolved_language,
             path_prefix=resolved_path_prefix,
-            limit=limit,
+            cursor_id=cursor_id,
+            limit=limit + 1,
         )
+        next_cursor = None
+        if len(files) > limit:
+            next_cursor = self._encode_cursor(files[limit - 1].id)
+            files = files[:limit]
         return FilesListResult(
             count=len(files),
             files=files if view == "full" else [compact_file_item(file) for file in files],
+            next_cursor=next_cursor,
         )
 
     def get(
@@ -325,14 +346,30 @@ class FilesService:
         except Exception:
             return
 
-    def _drain_pending_embeddings(self, project: str) -> None:
+    def _flush_index_batch(self, batch: list[FileIndexDraft]) -> None:
+        if not batch:
+            return
+        self._repository.upsert_files(batch)
+        for draft in batch:
+            self._queue_embeddings(draft.document_id)
+
+    def _drain_pending_embeddings(
+        self,
+        project: str,
+        *,
+        limit: int = 8,
+        time_budget_seconds: float | None = None,
+    ) -> None:
         if self._embedding_service is None or not hasattr(self._repository, "pending_embedding_documents"):
             return
         try:
-            pending_documents = self._repository.pending_embedding_documents(project=project)
+            pending_documents = self._repository.pending_embedding_documents(project=project, limit=limit)
         except Exception:
             return
+        started_at = monotonic()
         for document_id in pending_documents:
+            if time_budget_seconds is not None and monotonic() - started_at >= time_budget_seconds:
+                break
             try:
                 chunks = self._repository.list_chunks(document_id)
                 if not chunks:
@@ -534,6 +571,31 @@ class FilesService:
         base = Path(root).expanduser() if root is not None else Path.cwd()
         return (base / candidate).resolve().as_posix()
 
+    @staticmethod
+    def _encode_cursor(file_id: str) -> str:
+        payload = json.dumps({"id": file_id}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _decode_cursor(cursor: str | None) -> str | None:
+        if cursor is None or not cursor.strip():
+            return None
+        padding = "=" * (-len(cursor) % 4)
+        try:
+            raw_value = base64.urlsafe_b64decode(f"{cursor}{padding}".encode("ascii")).decode("utf-8")
+            payload = json.loads(raw_value)
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("cursor must be an opaque pagination token") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("cursor must be an opaque pagination token")
+        file_id = payload.get("id")
+        if isinstance(file_id, str) and file_id:
+            return file_id
+        path = payload.get("path")
+        if not isinstance(path, str) or not path or not isinstance(file_id, str) or not file_id:
+            raise ValueError("cursor must be an opaque pagination token")
+        return file_id
+
     def _resolve_file_record(
         self,
         *,
@@ -594,3 +656,9 @@ class FilesService:
     @staticmethod
     def _serialize_metatags(metatags: dict[str, object]) -> str:
         return json.dumps(metatags, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def _chunk_values(values: list[str], *, size: int) -> list[list[str]]:
+        if size <= 0:
+            raise ValueError("size must be greater than zero")
+        return [values[index : index + size] for index in range(0, len(values), size)]

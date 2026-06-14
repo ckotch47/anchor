@@ -127,6 +127,7 @@ def files_delete(
 @files_app.command(name="list")
 def files_list(
     limit: Annotated[int, typer.Option("--limit")] = 20,
+    cursor: Annotated[str | None, typer.Option("--cursor")] = None,
     root: Annotated[str | None, typer.Option("--root")] = None,
     language: Annotated[str | None, typer.Option("--language")] = None,
     path_prefix: Annotated[str | None, typer.Option("--path-prefix")] = None,
@@ -139,6 +140,7 @@ def files_list(
         resolved_project = resolve_project(container, project)
         result: FilesListResult = container.files_service.list(
             limit=limit,
+            cursor=cursor,
             root=root,
             language=language,
             path_prefix=path_prefix,
@@ -149,7 +151,11 @@ def files_list(
             json.dumps(
                 build_success_payload(
                     "files.list",
-                    {"count": result.count, "files": [file.model_dump() for file in result.files]},
+                    {
+                        "count": result.count,
+                        "files": [file.model_dump() for file in result.files],
+                        **({"next_cursor": result.next_cursor} if result.next_cursor is not None else {}),
+                    },
                     container,
                     view=view,
                     extra_meta={"project": resolved_project},

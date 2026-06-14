@@ -42,6 +42,7 @@ class FilesCliTest(unittest.TestCase):
             root = Path(tmpdir) / "repo"
             root.mkdir()
             (root / "app.py").write_text("def greet():\n    return 'hello'\n", encoding="utf-8")
+            (root / "beta.py").write_text("def beta():\n    return 'beta'\n", encoding="utf-8")
 
             config_path = Path(tmpdir) / "config.toml"
             db_path = Path(tmpdir) / "anchor.sqlite3"
@@ -50,13 +51,17 @@ class FilesCliTest(unittest.TestCase):
                     with patch("typer.echo"):
                         files_index(root=[str(root)], project="repo-a")
                     with patch("typer.echo") as list_echo_mock:
-                        files_list(project="repo-a", view="full")
+                        files_list(project="repo-a", view="full", limit=1)
 
         list_payload = json.loads(list_echo_mock.call_args.args[0])
         self.assertTrue(list_payload["ok"])
         self.assertEqual(list_payload["command"], "files.list")
         self.assertEqual(list_payload["data"]["count"], 1)
-        self.assertEqual(list_payload["data"]["files"][0]["path"], str((root / "app.py").resolve()))
+        self.assertIn(
+            list_payload["data"]["files"][0]["path"],
+            {str((root / "app.py").resolve()), str((root / "beta.py").resolve())},
+        )
+        self.assertIn("next_cursor", list_payload["data"])
 
     def test_files_get_emit_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
