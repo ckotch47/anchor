@@ -93,19 +93,31 @@ Retrieval is hybrid and should exist from the first production slice.
 5. Dedup and trim
    - keep one best chunk per document
    - trim the final response to the configured token budget
+   - cursor pagination for cross-entity search should use an opaque `score + entity_id` token
+   - cross-project search should stay opt-in instead of becoming the default scope
 6. Compact response
    - return only the small result set the agent needs
+
+Operational maintenance:
+
+- `health` checks the `settings` table and runs scheduled maintenance when `maintenance.last_vacuum` is older than 7 days.
+- `db compact` is the explicit cleanup path for soft-deleted rows, FTS rebuilds, vacuum, and final WAL truncation.
+- FTS fragmentation should be handled with explicit rebuilds instead of assuming SQLite will compact it automatically.
+- Soft-deleted rows should be physically purged on a maintenance schedule because they continue to occupy storage and index space until vacuumed.
 
 Filesystem retrieval uses the same retrieval stack, but the source of truth is the live filesystem:
 
 - index project roots on disk, not copied file snapshots
-- provide `files get` for a full indexed-file record and `files list` for project-scoped navigation
+- provide `files get` for a full indexed-file record and keep all `list` commands cursor-paginated for project-scoped navigation
+- keep `files list` cursor-paginated for very large repositories with opaque UUIDv7 `document_id` cursors
 - use `vector.chunk_size` and `vector.chunk_overlap` for file chunking defaults
 - chunk files by content type: Python `def`/`class`, Markdown `#` headings, fallback sliding window by lines
 - exclude binaries, vendor folders, build outputs, and configured ignore paths
 - handle repositories without git by falling back to filesystem metadata and mtime
-- clean stale chunks when files are removed or renamed
+- clean stale chunks when files are removed or renamed by batching the active roots during cleanup
+- use range predicates on the indexed path column for `path_prefix` filters so SQLite can use the path index efficiently
 - materialize file chunk embeddings and rerank them through the same provider contract as notes
+- write filesystem index updates in bounded batches (up to 100 files per batch, any batch may be smaller when the repo has fewer files left) instead of holding the whole repo in memory
 - store only metadata and retrieval slices in SQLite
 - keep the file index incremental so refreshes are bounded
 
@@ -114,6 +126,7 @@ Fallback rules:
 - if embeddings or rerank are unavailable, lexical retrieval still works
 - if generation is required and the provider is offline, emit a machine-readable error
 - search should degrade, not fail, when the provider is missing
+- if the SQLite vector extension is missing and a project already has more than 10K chunk embeddings, fail vector search explicitly with an installation instruction instead of silently scanning in Python
 
 ## Provider strategy
 
@@ -127,8 +140,10 @@ Fallback rules:
 - `tasks` should support common task relationships directly, while `document_links` remains the richer graph for cross-entity references and follow-up context.
 - `metatags` is stored as SQLite JSON text and treated as queryable metadata, not as PostgreSQL `jsonb`.
 - Search should scope by `project` first, then document type, then any metatag filters, and only then run lexical/vector/rerank ranking.
+- Cross-project search is an explicit opt-in via the query contract, not the default path.
 - Filesystem retrieval should scope by project and root path before indexing, then apply ignore rules before any chunking or ranking.
 - Cross-type retrieval should accept notes, tasks, history, and files as first-class search targets.
+- IVF indexing is a future performance upgrade after measured growth, not the baseline vector path.
 
 ## Non-goals
 

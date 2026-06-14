@@ -87,6 +87,7 @@
 
 - Describes whether the local core is ready and which config/profile was resolved.
 - Useful as the first machine check before any agent workflow.
+- If the maintenance window is due, `health` may also trigger scheduled SQLite cleanup from the `settings` table.
 
 Example:
 
@@ -125,6 +126,17 @@ Example:
 
 ```bash
 anchor db migrate
+```
+
+### `anchor db compact`
+
+- Purges soft-deleted rows past a retention window, rebuilds FTS indexes, optionally vacuums the database, and truncates the WAL.
+- Use this when the local SQLite file starts to accumulate tombstones, FTS fragmentation, or WAL growth.
+
+Example:
+
+```bash
+anchor db compact --retention-days 30 --rebuild-search-indexes --vacuum --checkpoint
 ```
 
 ### `anchor notes add`
@@ -174,11 +186,12 @@ anchor notes delete --id <note-id> --project repo-a
 - The target contract is project-scoped, so list/search should stay inside the selected project boundary.
 - Use `--project` to override the default project scope from config.
 - Use `--limit` to narrow the response.
+- Use `--cursor` with the opaque `next_cursor` token to fetch the next page.
 
 Example:
 
 ```bash
-anchor notes list --limit 5 --project repo-a
+anchor notes list --limit 5 --cursor <next-cursor> --project repo-a
 ```
 
 ### `anchor notes get`
@@ -304,14 +317,15 @@ anchor tasks search --query "deploy" --limit 5 --project repo-a
 
 - Searches across multiple domain slices in one request.
 - Use `--types notes,tasks,files` to scope the retrieval surface explicitly.
-- The request is modeled as a first-class search query with `query`, `types`, `project`, `limit`, `budget_tokens`, and optional `weights`.
-- The result envelope stays compact and can add explain-style retrieval stats with `--explain`.
+- Cross-project search is opt-in through `--projects repo-a,repo-b`; the default remains a single selected project.
+- The request is modeled as a first-class search query with `query`, `types`, `project`, optional `projects`, `limit`, `budget_tokens`, optional `weights`, and an opaque `--cursor` token for score-based pagination.
+- The result envelope stays compact, can add explain-style retrieval stats with `--explain`, and returns `next_cursor` when another page is available.
 - Current support covers `notes`, `tasks`, and `files`; `history` is reserved for the later slice.
 
 Example:
 
 ```bash
-anchor search --query "deploy" --types notes,tasks,files --limit 5 --project repo-a --explain
+anchor search --query "deploy" --types notes,tasks,files --limit 5 --project repo-a --projects repo-a,repo-b --cursor <next-cursor> --explain
 ```
 
 ### `anchor mcp`
@@ -371,14 +385,15 @@ anchor files delete --path ./repo/app.py --project repo-a
 
 - Returns indexed files for the selected project.
 - Emits a compact navigation record by default; `--view full` expands each row to the full indexed file record.
-- Use `--limit` to keep the response small when the repository is large.
+- Use `--limit` to keep each page small when the repository is large.
+- Use `--cursor` with the opaque UUIDv7-based token returned as `next_cursor` to fetch the next page.
 - `--root`, `--language`, and `--path-prefix` narrow the list before pagination.
-- The repository applies those filters in SQLite before rows are materialized, so the command does not load the full project file set first.
+- The repository applies those filters in SQLite before rows are materialized, and pagination is driven by `document_id` instead of keeping the whole path list in memory.
 
 Example:
 
 ```bash
-anchor files list --limit 10 --project repo-a
+anchor files list --limit 10 --cursor <next-cursor> --project repo-a
 ```
 
 ### `anchor files search`
@@ -420,12 +435,13 @@ anchor tasks update --id <task-id> --priority 5 --project repo-a
 - The target contract is project-scoped, so list/search should stay inside the selected project boundary.
 - Use `--project` to override the default project scope from config.
 - Use `--limit` to narrow the response.
+- Use `--cursor` with the opaque `next_cursor` token to fetch the next page.
 - `--view full` expands each task row to the full task record.
 
 Example:
 
 ```bash
-anchor tasks list --limit 5 --project repo-a
+anchor tasks list --limit 5 --cursor <next-cursor> --project repo-a
 ```
 
 ### `anchor tasks done`
