@@ -4,7 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from anchor.application.files.models import FilesListResult
+from anchor.application.files.models import FilesGetResult, FilesListResult
 from anchor.application.history.models import HistorySearchResult
 from anchor.application.retrieval.search_query import SearchQuery
 from anchor.cli_shared import build_success_payload, config_payload, resolve_project, resolve_view
@@ -445,9 +445,45 @@ def files_index(
     return _success("files.index", result.model_dump(), container, project=resolved_project)
 
 
+@mcp_app.tool(name="files_get", description="Get one indexed file by id or path")
+def files_get(
+    file_id: str | None = None,
+    path: str | None = None,
+    root: str | None = None,
+    language: str | None = None,
+    path_prefix: str | None = None,
+    project: str | None = None,
+    view: str | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    resolved_project = resolve_project(container, project)
+    try:
+        resolved_view = resolve_view(container, view)
+    except ValueError as exc:
+        return _error("files.get", "INVALID_ARGS", str(exc))
+    try:
+        result: FilesGetResult = container.files_service.get(
+            file_id=file_id,
+            path=path,
+            root=root,
+            language=language,
+            path_prefix=path_prefix,
+            project=resolved_project,
+        )
+    except LookupError as exc:
+        return _error("files.get", "NOT_FOUND", str(exc))
+    except ValueError as exc:
+        return _error("files.get", "INVALID_ARGS", str(exc))
+    return _success("files.get", {"file": result.file.model_dump()}, container, project=resolved_project, extra_meta={"view": resolved_view})
+
+
 @mcp_app.tool(name="files_list", description="List indexed files in the current project")
 def files_list(
     limit: int = 20,
+    root: str | None = None,
+    language: str | None = None,
+    path_prefix: str | None = None,
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
@@ -458,7 +494,14 @@ def files_list(
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
         return _error("files.list", "INVALID_ARGS", str(exc))
-    result: FilesListResult = container.files_service.list(limit=limit, project=resolved_project, view=resolved_view)
+    result: FilesListResult = container.files_service.list(
+        limit=limit,
+        root=root,
+        language=language,
+        path_prefix=path_prefix,
+        project=resolved_project,
+        view=resolved_view,
+    )
     return _success(
         "files.list",
         {"count": result.count, "files": [file.model_dump() for file in result.files]},
@@ -472,6 +515,10 @@ def files_list(
 def files_search(
     query: str,
     limit: int = 20,
+    root: str | None = None,
+    language: str | None = None,
+    path_prefix: str | None = None,
+    explain: bool = False,
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
@@ -482,13 +529,27 @@ def files_search(
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
         return _error("files.search", "INVALID_ARGS", str(exc))
-    result = container.files_service.search(query=query, limit=limit, project=resolved_project, view=resolved_view)
+    result = container.files_service.search(
+        query=query,
+        limit=limit,
+        root=root,
+        language=language,
+        path_prefix=path_prefix,
+        explain=explain,
+        project=resolved_project,
+        view=resolved_view,
+    )
     return _success(
         "files.search",
-        {"query": result.query, "count": result.count, "results": [hit.model_dump() for hit in result.results]},
+        {
+            "query": result.query,
+            "count": result.count,
+            "results": [hit.model_dump() for hit in result.results],
+            **({"stats": result.stats} if result.stats is not None else {}),
+        },
         container,
         project=resolved_project,
-        extra_meta={"view": resolved_view},
+        extra_meta={"view": resolved_view, "explain": explain},
     )
 
 

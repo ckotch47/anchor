@@ -99,6 +99,7 @@ Retrieval is hybrid and should exist from the first production slice.
 Filesystem retrieval uses the same retrieval stack, but the source of truth is the live filesystem:
 
 - index project roots on disk, not copied file snapshots
+- provide `files get` for a full indexed-file record and `files list` for project-scoped navigation
 - use `vector.chunk_size` and `vector.chunk_overlap` for file chunking defaults
 - chunk files by content type: Python `def`/`class`, Markdown `#` headings, fallback sliding window by lines
 - exclude binaries, vendor folders, build outputs, and configured ignore paths

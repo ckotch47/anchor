@@ -5,7 +5,7 @@ from typing import Annotated, Any
 
 import typer
 
-from anchor.cli_files import files_app, files_index, files_list, files_search
+from anchor.cli_files import files_app, files_get, files_index, files_list, files_search
 from anchor.cli_history import history_app, history_append, history_delete, history_search, history_update
 from anchor.cli_notes import notes_add, notes_app, notes_delete, notes_get, notes_list, notes_search, notes_update
 from anchor.cli_search import search_command
@@ -25,6 +25,7 @@ __all__ = [
     "app",
     "config_command",
     "db_command",
+    "files_get",
     "files_index",
     "files_list",
     "files_search",

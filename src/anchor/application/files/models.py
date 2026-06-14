@@ -67,6 +67,10 @@ class FilesIndexResult(BaseModel):
     deleted: int
 
 
+class FilesGetResult(BaseModel):
+    file: IndexedFileRecord
+
+
 class FilesListResult(BaseModel):
     count: int
     files: list[IndexedFileRecord | FileListItem]
@@ -76,3 +80,4 @@ class FilesSearchResult(BaseModel):
     query: str
     count: int
     results: list[FileSearchHit]
+    stats: dict[str, Any] | None = None

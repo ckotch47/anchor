@@ -40,9 +40,55 @@ def files_index(
         emit_error("files", "DB_MIGRATION_FAILED", str(exc))
 
 
+@files_app.command(name="get")
+def files_get(
+    file_id: Annotated[str | None, typer.Option("--id")] = None,
+    path: Annotated[str | None, typer.Option("--path")] = None,
+    root: Annotated[str | None, typer.Option("--root")] = None,
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    path_prefix: Annotated[str | None, typer.Option("--path-prefix")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    view: Annotated[str | None, typer.Option("--view")] = None,
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+) -> None:
+    try:
+        container = build_container(profile=profile)
+        resolved_project = resolve_project(container, project)
+        result = container.files_service.get(
+            file_id=file_id,
+            path=path,
+            root=root,
+            language=language,
+            path_prefix=path_prefix,
+            project=resolved_project,
+        )
+        typer.echo(
+            json.dumps(
+                build_success_payload(
+                    "files.get",
+                    {"file": result.file.model_dump()},
+                    container,
+                    view=view,
+                    extra_meta={"project": resolved_project},
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    except LookupError as exc:
+        emit_error("files", "NOT_FOUND", str(exc))
+    except ValueError as exc:
+        emit_error("files", "INVALID_ARGS", str(exc))
+    except Exception as exc:
+        emit_error("files", "DB_MIGRATION_FAILED", str(exc))
+
+
 @files_app.command(name="list")
 def files_list(
     limit: Annotated[int, typer.Option("--limit")] = 20,
+    root: Annotated[str | None, typer.Option("--root")] = None,
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    path_prefix: Annotated[str | None, typer.Option("--path-prefix")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     view: Annotated[str | None, typer.Option("--view")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
@@ -52,6 +98,9 @@ def files_list(
         resolved_project = resolve_project(container, project)
         result: FilesListResult = container.files_service.list(
             limit=limit,
+            root=root,
+            language=language,
+            path_prefix=path_prefix,
             project=resolved_project,
             view=resolve_view(container, view),
         )
@@ -78,6 +127,10 @@ def files_list(
 def files_search(
     query: Annotated[str, typer.Option("--query")],
     limit: Annotated[int, typer.Option("--limit")] = 20,
+    root: Annotated[str | None, typer.Option("--root")] = None,
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    path_prefix: Annotated[str | None, typer.Option("--path-prefix")] = None,
+    explain: Annotated[bool, typer.Option("--explain")] = False,
     project: Annotated[str | None, typer.Option("--project")] = None,
     view: Annotated[str | None, typer.Option("--view")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
@@ -88,6 +141,10 @@ def files_search(
         result: FilesSearchResult = container.files_service.search(
             query=query,
             limit=limit,
+            explain=explain,
+            root=root,
+            language=language,
+            path_prefix=path_prefix,
             project=resolved_project,
             view=resolve_view(container, view),
         )
@@ -99,10 +156,11 @@ def files_search(
                         "query": result.query,
                         "count": result.count,
                         "results": [hit.model_dump() for hit in result.results],
+                        **({"stats": result.stats} if result.stats is not None else {}),
                     },
                     container,
                     view=view,
-                    extra_meta={"project": resolved_project},
+                    extra_meta={"project": resolved_project, "explain": explain},
                 ),
                 ensure_ascii=False,
                 indent=2,

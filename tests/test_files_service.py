@@ -10,7 +10,7 @@ from anchor.adapters.sqlite_migration_repository import SqliteMigrationRepositor
 from anchor.application.embeddings.models import ChunkEmbeddingRecord
 from anchor.application.embeddings.service import ChunkEmbeddingsResult
 from anchor.application.files.chunking import FileChunkingService
-from anchor.application.files.models import FileListItem, FileSearchCandidate
+from anchor.application.files.models import FileListItem, FileSearchCandidate, IndexedFileRecord
 from anchor.application.files.service import FilesService
 
 FILE_ID = uuid7_str()
@@ -19,6 +19,70 @@ FILE_EMBEDDING_CHUNK_ID = uuid7_str()
 
 
 class FilesServiceTest(unittest.TestCase):
+    def test_get_returns_full_record_by_id(self) -> None:
+        class FakeRepository:
+            def get(self, document_id: str, *, project: str):
+                del project
+                if document_id != FILE_ID:
+                    return None
+                return IndexedFileRecord(
+                    id=FILE_ID,
+                    project="repo-a",
+                    metatags={},
+                    path="/repo/app.py",
+                    root_path="/repo",
+                    language="python",
+                    file_size=42,
+                    content_hash="hash",
+                    mtime_ns=1,
+                    created_at="2026-06-13T00:00:00+00:00",
+                    updated_at="2026-06-13T00:00:00+00:00",
+                    deleted_at=None,
+                )
+
+            def get_by_path(self, *, project: str, path: str):
+                del project, path
+                return None
+
+        service = FilesService(repository=FakeRepository(), chunking_service=FileChunkingService(), project="repo-a")
+
+        result = service.get(file_id=FILE_ID, project="repo-a")
+
+        self.assertEqual(result.file.id, FILE_ID)
+        self.assertEqual(result.file.path, "/repo/app.py")
+
+    def test_get_returns_full_record_by_path(self) -> None:
+        class FakeRepository:
+            def get(self, document_id: str, *, project: str):
+                del document_id, project
+                return None
+
+            def get_by_path(self, *, project: str, path: str):
+                del project
+                if path != "/repo/app.py":
+                    return None
+                return IndexedFileRecord(
+                    id=FILE_ID,
+                    project="repo-a",
+                    metatags={},
+                    path="/repo/app.py",
+                    root_path="/repo",
+                    language="python",
+                    file_size=42,
+                    content_hash="hash",
+                    mtime_ns=1,
+                    created_at="2026-06-13T00:00:00+00:00",
+                    updated_at="2026-06-13T00:00:00+00:00",
+                    deleted_at=None,
+                )
+
+        service = FilesService(repository=FakeRepository(), chunking_service=FileChunkingService(), project="repo-a")
+
+        result = service.get(path="/repo/app.py", project="repo-a")
+
+        self.assertEqual(result.file.id, FILE_ID)
+        self.assertEqual(result.file.path, "/repo/app.py")
+
     def test_list_returns_compact_file_items(self) -> None:
         class FakeRepository:
             def list_indexed_files(self, *, project: str):
@@ -44,6 +108,34 @@ class FilesServiceTest(unittest.TestCase):
         self.assertEqual(result.count, 1)
         self.assertEqual(result.files[0].id, FILE_ID)
         self.assertEqual(result.files[0].path, "/repo/app.py")
+
+    def test_list_applies_filters(self) -> None:
+        class FakeRepository:
+            def list_indexed_files(self, *, project: str):
+                del project
+                return [
+                    FileListItem(
+                        id=FILE_ID,
+                        path="/repo/app.py",
+                        root_path="/repo",
+                        language="python",
+                        file_size=42,
+                    ),
+                    FileListItem(
+                        id=uuid7_str(),
+                        path="/repo/app.md",
+                        root_path="/repo",
+                        language="markdown",
+                        file_size=24,
+                    ),
+                ]
+
+        service = FilesService(repository=FakeRepository(), chunking_service=FileChunkingService(), project="repo-a")
+
+        result = service.list(project="repo-a", language="python")
+
+        self.assertEqual(result.count, 1)
+        self.assertEqual(result.files[0].language, "python")
 
     def test_search_uses_vector_and_rerank(self) -> None:
         class FakeRepository:
@@ -110,6 +202,41 @@ class FilesServiceTest(unittest.TestCase):
         self.assertEqual(result.results[0].file.id, FILE_ID)
         self.assertGreater(result.results[0].score, 0.7)
         self.assertEqual(result.results[0].snippet, "vector snippet with more detail")
+
+    def test_search_explain_returns_stats(self) -> None:
+        class FakeRepository:
+            def search_lexical_candidates(self, query: str, limit: int, *, project: str):
+                del query, limit, project
+                return [
+                    FileSearchCandidate(
+                        file=FileListItem(
+                            id=FILE_ID,
+                            path="/repo/app.py",
+                            root_path="/repo",
+                            language="python",
+                            file_size=42,
+                        ),
+                        chunk_id=FILE_CHUNK_ID,
+                        snippet="lexical snippet",
+                        token_count=2,
+                        lexical_score=0.2,
+                    )
+                ]
+
+            def search_vector_candidates(self, query_embedding: list[float], limit: int, *, project: str):
+                del query_embedding, limit, project
+                return []
+
+        service = FilesService(
+            repository=FakeRepository(),
+            chunking_service=FileChunkingService(),
+            project="repo-a",
+        )
+
+        result = service.search("deploy", project="repo-a", explain=True)
+
+        self.assertIsNotNone(result.stats)
+        self.assertEqual(result.stats["returned_count"], 1)
 
     def test_index_and_search_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

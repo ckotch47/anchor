@@ -13,6 +13,7 @@ from anchor.application.files.chunking import FileChunkingService
 from anchor.application.files.models import (
     FileSearchCandidate,
     FileSearchHit,
+    FilesGetResult,
     FilesIndexResult,
     FilesListResult,
     FilesSearchResult,
@@ -150,15 +151,67 @@ class FilesService:
                 deleted += 1
         return FilesIndexResult(count=indexed + deleted, indexed=indexed, skipped=skipped, deleted=deleted)
 
-    def list(self, limit: int = 20, *, project: str | None = None, view: str = "compact") -> FilesListResult:
+    def list(
+        self,
+        limit: int = 20,
+        *,
+        project: str | None = None,
+        view: str = "compact",
+        root: str | None = None,
+        language: str | None = None,
+        path_prefix: str | None = None,
+    ) -> FilesListResult:
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
         resolved_project = project or self._project
-        files = self._repository.list_indexed_files(project=resolved_project)[:limit]
+        resolved_root = self._normalize_root(root)
+        resolved_language = self._normalize_language(language)
+        resolved_path_prefix = self._normalize_path_prefix(path_prefix)
+        files = [
+            file
+            for file in self._repository.list_indexed_files(project=resolved_project)
+            if self._file_matches_filters(
+                file,
+                root=resolved_root,
+                language=resolved_language,
+                path_prefix=resolved_path_prefix,
+            )
+        ][:limit]
         return FilesListResult(
             count=len(files),
             files=files if view == "full" else [compact_file_item(file) for file in files],
         )
+
+    def get(
+        self,
+        file_id: str | None = None,
+        *,
+        path: str | None = None,
+        project: str | None = None,
+        root: str | None = None,
+        language: str | None = None,
+        path_prefix: str | None = None,
+    ) -> FilesGetResult:
+        if file_id is None and (path is None or not path.strip()):
+            raise ValueError("files get requires --id or --path")
+        resolved_project = project or self._project
+        resolved_root = self._normalize_root(root)
+        resolved_language = self._normalize_language(language)
+        resolved_path_prefix = self._normalize_path_prefix(path_prefix)
+        if path is not None and path.strip():
+            record = self._repository.get_by_path(project=resolved_project, path=path)
+        else:
+            record = self._repository.get(file_id or "", project=resolved_project)
+        if record is None:
+            raise LookupError("file not found")
+        if not self._file_matches_filters(
+            record,
+            root=resolved_root,
+            language=resolved_language,
+            path_prefix=resolved_path_prefix,
+        ):
+            raise LookupError("file not found")
+        return FilesGetResult(file=record)
 
     def search(
         self,
@@ -168,14 +221,28 @@ class FilesService:
         project: str | None = None,
         budget_tokens: int | None = None,
         view: str = "compact",
+        explain: bool = False,
+        root: str | None = None,
+        language: str | None = None,
+        path_prefix: str | None = None,
     ) -> FilesSearchResult:
         self._require_non_empty(query, "query")
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
         resolved_project = project or self._project
+        resolved_root = self._normalize_root(root)
+        resolved_language = self._normalize_language(language)
+        resolved_path_prefix = self._normalize_path_prefix(path_prefix)
         self._drain_pending_embeddings(resolved_project)
         candidate_limit = max(limit * 4, limit)
-        candidates = self._collect_candidates(query, candidate_limit, resolved_project)
+        candidates = self._collect_candidates(
+            query,
+            candidate_limit,
+            resolved_project,
+            root=resolved_root,
+            language=resolved_language,
+            path_prefix=resolved_path_prefix,
+        )
         reranked_candidates = self._rerank_candidates(query, candidates)
         deduplicated = self._deduplicate_by_file(reranked_candidates)
         trimmed = self._trim_to_budget(
@@ -195,7 +262,20 @@ class FilesService:
             )
             for candidate in trimmed[:limit]
         ]
-        return FilesSearchResult(query=query, count=len(results), results=results)
+        stats = None
+        if explain:
+            stats = {
+                "candidate_count": len(candidates),
+                "deduplicated_count": len(deduplicated),
+                "returned_count": len(results),
+                "budget_tokens": budget_tokens if budget_tokens is not None else self._budget_tokens,
+                "filters": {
+                    "root": resolved_root,
+                    "language": resolved_language,
+                    "path_prefix": resolved_path_prefix,
+                },
+            }
+        return FilesSearchResult(query=query, count=len(results), results=results, stats=stats)
 
     @staticmethod
     def _require_non_empty(value: str, field: str) -> None:
@@ -240,7 +320,16 @@ class FilesService:
                 if hasattr(self._repository, "mark_embedding_index_error"):
                     self._repository.mark_embedding_index_error(document_id, last_error=str(exc))
 
-    def _collect_candidates(self, query: str, limit: int, project: str) -> list[FileSearchCandidate]:
+    def _collect_candidates(
+        self,
+        query: str,
+        limit: int,
+        project: str,
+        *,
+        root: str | None = None,
+        language: str | None = None,
+        path_prefix: str | None = None,
+    ) -> list[FileSearchCandidate]:
         lexical_rows = self._repository.search_lexical_candidates(query=query, limit=limit, project=project)
         semantic_rows: list[FileSearchCandidate] = []
         if self._embedding_service is not None:
@@ -269,7 +358,16 @@ class FilesService:
             if candidate.snippet and len(candidate.snippet) > len(current.snippet):
                 current.snippet = candidate.snippet
             current.token_count = max(current.token_count, candidate.token_count)
-        return list(merged.values())
+        return [
+            candidate
+            for candidate in merged.values()
+            if self._file_matches_filters(
+                candidate.file,
+                root=root,
+                language=language,
+                path_prefix=path_prefix,
+            )
+        ]
 
     def _rerank_candidates(self, query: str, candidates: list[FileSearchCandidate]) -> list[FileSearchCandidate]:
         if not candidates:
@@ -365,6 +463,44 @@ class FilesService:
     def _root_matches(root_path: str, roots: list[Path]) -> bool:
         resolved_root = Path(root_path).resolve()
         return any(resolved_root == root.resolve() for root in roots)
+
+    @staticmethod
+    def _normalize_root(root: str | None) -> str | None:
+        if root is None or not root.strip():
+            return None
+        return Path(root).expanduser().resolve().as_posix()
+
+    @staticmethod
+    def _normalize_language(language: str | None) -> str | None:
+        if language is None or not language.strip():
+            return None
+        return language.strip().lower()
+
+    @staticmethod
+    def _normalize_path_prefix(path_prefix: str | None) -> str | None:
+        if path_prefix is None or not path_prefix.strip():
+            return None
+        return Path(path_prefix).expanduser().resolve().as_posix()
+
+    @staticmethod
+    def _file_matches_filters(
+        file: FileSearchCandidate | FileSearchHit | FilesGetResult | object,
+        *,
+        root: str | None,
+        language: str | None,
+        path_prefix: str | None,
+    ) -> bool:
+        file_obj = getattr(file, "file", file)
+        file_root = getattr(file_obj, "root_path", None)
+        file_language = getattr(file_obj, "language", None)
+        file_path = getattr(file_obj, "path", None)
+        if root is not None and file_root != root:
+            return False
+        if language is not None and str(file_language).lower() != language:
+            return False
+        if path_prefix is not None and (file_path is None or not str(file_path).startswith(path_prefix)):
+            return False
+        return True
 
     def _trim_to_budget(self, results: list[FileSearchHit], budget_tokens: int) -> list[FileSearchHit]:
         if budget_tokens <= 0:

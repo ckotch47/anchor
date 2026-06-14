@@ -341,11 +341,25 @@ Example:
 anchor files index --root ./repo --project repo-a
 ```
 
+### `anchor files get`
+
+- Returns the full indexed file record for one file by `--id` or `--path`.
+- Use `--project` to scope the lookup to a repository or workspace.
+- `--root`, `--language`, and `--path-prefix` narrow the lookup when agents know the file slice they want.
+- `--view` is accepted for transport parity, but the command always returns the full file record.
+
+Example:
+
+```bash
+anchor files get --path ./repo/app.py --project repo-a
+```
+
 ### `anchor files list`
 
 - Returns indexed files for the selected project.
 - Emits a compact navigation record by default; `--view full` expands each row to the full indexed file record.
 - Use `--limit` to keep the response small when the repository is large.
+- `--root`, `--language`, and `--path-prefix` narrow the list before pagination.
 
 Example:
 
@@ -360,6 +374,8 @@ anchor files list --limit 10 --project repo-a
 - Uses SQLite-native vector search when the extension is available.
 - The vector layer is initialized from the shared connection lifecycle, not a separate index daemon.
 - Uses the configured project scope by default.
+- `--root`, `--language`, and `--path-prefix` narrow the candidate pool before rerank and budget trim.
+- `--explain` adds retrieval stats to the machine response so agents can see candidate and dedup counts.
 - `--view full` expands each hit to the full indexed file record.
 
 Example:
@@ -436,6 +452,7 @@ anchor tasks delete --id <task-id> --project repo-a
 - `anchor tasks list`
 - `anchor tasks done`
 - `anchor files index`
+- `anchor files get`
 - `anchor files list`
 - `anchor files search`
 - `anchor mcp`

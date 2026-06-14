@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from anchor.mcp_server import (
+    files_get,
     files_index,
     files_list,
     files_search,
@@ -39,6 +40,7 @@ class McpServerTest(unittest.TestCase):
         self.assertIn("history_delete", tool_names)
         self.assertIn("tasks_add", tool_names)
         self.assertIn("files_index", tool_names)
+        self.assertIn("files_get", tool_names)
         self.assertIn("files_list", tool_names)
         self.assertIn("files_search", tool_names)
 
@@ -62,21 +64,25 @@ class McpServerTest(unittest.TestCase):
                     tasks_list_payload = tasks_list(project="repo-a", view="full")
                     tasks_search_payload = tasks_search(query="Task", project="repo-a", view="full")
                     history_search_payload = history_search(query="Deploy", project="repo-a", view="full")
+                    files_get_payload = files_get(path=str((root / "app.py").resolve()), project="repo-a", view="full")
                     files_list_payload = files_list(project="repo-a", view="full")
-                    files_search_payload = files_search(query="greet", project="repo-a", view="full")
+                    files_search_payload = files_search(query="greet", project="repo-a", view="full", explain=True)
 
         self.assertIn("body", notes_list_payload["data"]["notes"][0])
         self.assertIn("body", notes_search_payload["data"]["results"][0]["note"])
         self.assertIn("body", tasks_list_payload["data"]["tasks"][0])
         self.assertIn("body", tasks_search_payload["data"]["results"][0]["task"])
         self.assertIn("payload", history_search_payload["data"]["results"][0]["history"])
+        self.assertIn("content_hash", files_get_payload["data"]["file"])
         self.assertIn("content_hash", files_list_payload["data"]["files"][0])
         self.assertIn("content_hash", files_search_payload["data"]["results"][0]["file"])
+        self.assertIn("stats", files_search_payload["data"])
         self.assertEqual(notes_list_payload["meta"]["view"], "full")
         self.assertEqual(notes_search_payload["meta"]["view"], "full")
         self.assertEqual(tasks_list_payload["meta"]["view"], "full")
         self.assertEqual(tasks_search_payload["meta"]["view"], "full")
         self.assertEqual(history_search_payload["meta"]["view"], "full")
+        self.assertEqual(files_get_payload["meta"]["view"], "full")
         self.assertEqual(files_list_payload["meta"]["view"], "full")
         self.assertEqual(files_search_payload["meta"]["view"], "full")
 
