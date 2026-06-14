@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import CallToolResult
 
 from anchor.application.files.models import FilesGetResult, FilesListResult
 from anchor.application.history.models import HistorySearchResult
@@ -17,69 +18,85 @@ def _container(profile: str | None = None):
     return build_container(profile=profile)
 
 
-def _success(command: str, data: dict[str, Any], container: Any, *, project: str | None = None, extra_meta: dict[str, Any] | None = None) -> dict[str, Any]:
-    return build_success_payload(command, data, container, extra_meta={"project": project or container.config.runtime.default_project, **(extra_meta or {})})
+def _tool_result(command: str, data: dict[str, Any], container: Any, *, project: str | None = None, extra_meta: dict[str, Any] | None = None, is_error: bool = False) -> CallToolResult:
+    payload = build_success_payload(
+        command,
+        data,
+        container,
+        extra_meta={"project": project or container.config.runtime.default_project, **(extra_meta or {})},
+    )
+    return CallToolResult(content=[], structuredContent=payload, isError=is_error)
 
 
-def _error(command: str, code: str, message: str) -> dict[str, Any]:
-    return {
-        "ok": False,
-        "command": command,
-        "error": {
-            "code": code,
-            "message": message,
-            "retryable": False,
+def _failure(command: str, code: str, message: str, container: Any) -> CallToolResult:
+    return CallToolResult(
+        content=[],
+        structuredContent={
+            "ok": False,
+            "command": command,
+            "error": {
+                "code": code,
+                "message": message,
+                "retryable": False,
+            },
         },
-    }
+        isError=True,
+    )
 
 
 @mcp_app.tool(name="health", description="Read the local runtime and database health")
 def health(profile: str | None = None) -> dict[str, Any]:
     container = _container(profile)
     result = container.health_service.health()
-    return {
-        "ok": True,
-        "command": "health",
-        "data": result.model_dump(),
-        "meta": {
-            "view": container.config.runtime.default_view,
-            "profile": container.profile_name,
-            "config_path": str(container.config_path),
+    return CallToolResult(
+        content=[],
+        structuredContent={
+            "ok": True,
+            "command": "health",
+            "data": result.model_dump(),
+            "meta": {
+                "view": container.config.runtime.default_view,
+                "profile": container.profile_name,
+                "config_path": str(container.config_path),
+            },
         },
-    }
+    )
 
 
 @mcp_app.tool(name="config_get", description="Read the current config")
 def config_get(profile: str | None = None) -> dict[str, Any]:
     container = _container(profile)
     result = container.config_service.get(profile=profile)
-    return config_payload("config.get", result, container)
+    return CallToolResult(content=[], structuredContent=config_payload("config.get", result, container))
 
 
 @mcp_app.tool(name="config_set", description="Update one config field")
 def config_set(section: str, key: str, value: str, profile: str | None = None) -> dict[str, Any]:
     container = _container(profile)
     result = container.config_service.set(section=section, key=key, value=value, profile=profile)
-    return config_payload("config.set", result, container)
+    return CallToolResult(content=[], structuredContent=config_payload("config.set", result, container))
 
 
 @mcp_app.tool(name="config_init", description="Initialize config from config.example.toml")
 def config_init(force: bool = False, profile: str | None = None) -> dict[str, Any]:
     container = _container(profile)
     result = container.config_service.init(force=force)
-    return {
-        "ok": True,
-        "command": "config.init",
-        "data": {
-            "config": result.config.model_dump(),
-            "config_path": result.config_path,
-            "profile_name": result.profile_name,
+    return CallToolResult(
+        content=[],
+        structuredContent={
+            "ok": True,
+            "command": "config.init",
+            "data": {
+                "config": result.config.model_dump(),
+                "config_path": result.config_path,
+                "profile_name": result.profile_name,
+            },
+            "meta": {
+                "view": result.config.runtime.default_view,
+                "profile": container.profile_name,
+            },
         },
-        "meta": {
-            "view": result.config.runtime.default_view,
-            "profile": container.profile_name,
-        },
-    }
+    )
 
 
 @mcp_app.tool(name="db_migrate", description="Apply pending SQLite migrations")
@@ -87,21 +104,24 @@ def db_migrate(profile: str | None = None) -> dict[str, Any]:
     container = _container(profile)
     result = container.migration_service.migrate()
     checkpoint = container.maintenance_service.checkpoint_wal()
-    return {
-        "ok": True,
-        "command": "db.migrate",
-        "data": {
-            "database_path": result.database_path,
-            "applied": result.applied,
-            "current_version": result.current_version,
-            "applied_versions": result.applied_versions,
-            "checkpoint": checkpoint,
+    return CallToolResult(
+        content=[],
+        structuredContent={
+            "ok": True,
+            "command": "db.migrate",
+            "data": {
+                "database_path": result.database_path,
+                "applied": result.applied,
+                "current_version": result.current_version,
+                "applied_versions": result.applied_versions,
+                "checkpoint": checkpoint,
+            },
+            "meta": {
+                "view": container.config.runtime.default_view,
+                "profile": container.profile_name,
+            },
         },
-        "meta": {
-            "view": container.config.runtime.default_view,
-            "profile": container.profile_name,
-        },
-    }
+    )
 
 
 @mcp_app.tool(name="db_compact", description="Compact SQLite storage and rebuild retrieval indexes")
@@ -114,7 +134,7 @@ def db_compact(
 ) -> dict[str, Any]:
     container = _container(profile)
     if retention_days < 0:
-        return _error("db.compact", "INVALID_ARGS", "retention_days must be greater than or equal to zero")
+        return _failure("db.compact", "INVALID_ARGS", "retention_days must be greater than or equal to zero", container)
     deleted_before = None
     if retention_days > 0:
         from datetime import UTC, datetime, timedelta
@@ -126,15 +146,18 @@ def db_compact(
         vacuum=vacuum,
         checkpoint=checkpoint,
     )
-    return {
-        "ok": True,
-        "command": "db.compact",
-        "data": result.model_dump(),
-        "meta": {
-            "view": container.config.runtime.default_view,
-            "profile": container.profile_name,
+    return CallToolResult(
+        content=[],
+        structuredContent={
+            "ok": True,
+            "command": "db.compact",
+            "data": result.model_dump(),
+            "meta": {
+                "view": container.config.runtime.default_view,
+                "profile": container.profile_name,
+            },
         },
-    }
+    )
 
 
 @mcp_app.tool(name="notes_add", description="Create a note")
@@ -159,7 +182,7 @@ def notes_add(
         project=resolved_project,
         metatags=metatags or {},
     )
-    return _success("notes.add", {"note": result.model_dump()}, container, project=resolved_project)
+    return _tool_result("notes.add", {"note": result.model_dump()}, container, project=resolved_project)
 
 
 @mcp_app.tool(name="notes_update", description="Update a note")
@@ -186,7 +209,7 @@ def notes_update(
         project=resolved_project,
         metatags=metatags,
     )
-    return _success("notes.update", {"note": result.model_dump()}, container, project=resolved_project)
+    return _tool_result("notes.update", {"note": result.model_dump()}, container, project=resolved_project)
 
 
 @mcp_app.tool(name="notes_list", description="List notes in the current project")
@@ -202,9 +225,9 @@ def notes_list(
     try:
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
-        return _error("notes.list", "INVALID_ARGS", str(exc))
+        return _failure("notes.list", "INVALID_ARGS", str(exc), container)
     result = container.notes_service.list(limit=limit, cursor=cursor, project=resolved_project, view=resolved_view)
-    return _success(
+    return _tool_result(
         "notes.list",
         {
             "count": result.count,
@@ -222,7 +245,7 @@ def notes_get(note_id: str, project: str | None = None, profile: str | None = No
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     result = container.notes_service.get(note_id, project=resolved_project)
-    return _success("notes.get", {"note": result.model_dump()}, container, project=resolved_project)
+    return _tool_result("notes.get", {"note": result.model_dump()}, container, project=resolved_project)
 
 
 @mcp_app.tool(name="notes_delete", description="Soft-delete a note")
@@ -230,7 +253,7 @@ def notes_delete(note_id: str, project: str | None = None, profile: str | None =
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     result = container.notes_service.delete(note_id, project=resolved_project)
-    return _success("notes.delete", {"note": result.model_dump()}, container, project=resolved_project)
+    return _tool_result("notes.delete", {"note": result.model_dump()}, container, project=resolved_project)
 
 
 @mcp_app.tool(name="notes_search", description="Search notes")
@@ -246,9 +269,9 @@ def notes_search(
     try:
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
-        return _error("notes.search", "INVALID_ARGS", str(exc))
+        return _failure("notes.search", "INVALID_ARGS", str(exc), container)
     result = container.notes_service.search(query=query, limit=limit, project=resolved_project, view=resolved_view)
-    return _success(
+    return _tool_result(
         "notes.search",
         {"query": result.query, "count": result.count, "results": [hit.model_dump() for hit in result.results]},
         container,
@@ -277,7 +300,7 @@ def history_append(
         project=resolved_project,
         metatags=metatags or {},
     )
-    return _success("history.append", {"history": result.model_dump()}, container, project=resolved_project)
+    return _tool_result("history.append", {"history": result.model_dump()}, container, project=resolved_project)
 
 
 @mcp_app.tool(name="history_update", description="Update a history entry")
@@ -302,7 +325,7 @@ def history_update(
         project=resolved_project,
         metatags=metatags,
     )
-    return _success("history.update", {"history": result.model_dump()}, container, project=resolved_project)
+    return _tool_result("history.update", {"history": result.model_dump()}, container, project=resolved_project)
 
 
 @mcp_app.tool(name="history_search", description="Search history entries")
@@ -318,14 +341,14 @@ def history_search(
     try:
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
-        return _error("history.search", "INVALID_ARGS", str(exc))
+        return _failure("history.search", "INVALID_ARGS", str(exc), container)
     result: HistorySearchResult = container.history_service.search(
         query=query,
         limit=limit,
         project=resolved_project,
         view=resolved_view,
     )
-    return _success(
+    return _tool_result(
         "history.search",
         {"query": result.query, "count": result.count, "results": [hit.model_dump() for hit in result.results]},
         container,
@@ -339,7 +362,7 @@ def history_delete(history_id: str, project: str | None = None, profile: str | N
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     result = container.history_service.delete(history_id, project=resolved_project)
-    return _success("history.delete", {"history": result.model_dump()}, container, project=resolved_project)
+    return _tool_result("history.delete", {"history": result.model_dump()}, container, project=resolved_project)
 
 
 @mcp_app.tool(name="tasks_add", description="Create a task")
@@ -372,7 +395,7 @@ def tasks_add(
         parent_document_id=parent_document_id,
         blocked_by_document_id=blocked_by_document_id,
     )
-    return _success("tasks.add", {"task": result.model_dump()}, container, project=resolved_project)
+    return _tool_result("tasks.add", {"task": result.model_dump()}, container, project=resolved_project)
 
 
 @mcp_app.tool(name="tasks_update", description="Update a task")
@@ -407,7 +430,7 @@ def tasks_update(
         parent_document_id=parent_document_id,
         blocked_by_document_id=blocked_by_document_id,
     )
-    return _success("tasks.update", {"task": result.model_dump()}, container, project=resolved_project)
+    return _tool_result("tasks.update", {"task": result.model_dump()}, container, project=resolved_project)
 
 
 @mcp_app.tool(name="tasks_list", description="List tasks in the current project")
@@ -423,9 +446,9 @@ def tasks_list(
     try:
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
-        return _error("tasks.list", "INVALID_ARGS", str(exc))
+        return _failure("tasks.list", "INVALID_ARGS", str(exc), container)
     result = container.tasks_service.list(limit=limit, cursor=cursor, project=resolved_project, view=resolved_view)
-    return _success(
+    return _tool_result(
         "tasks.list",
         {
             "count": result.count,
@@ -451,9 +474,9 @@ def tasks_search(
     try:
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
-        return _error("tasks.search", "INVALID_ARGS", str(exc))
+        return _failure("tasks.search", "INVALID_ARGS", str(exc), container)
     result = container.tasks_service.search(query=query, limit=limit, project=resolved_project, view=resolved_view)
-    return _success(
+    return _tool_result(
         "tasks.search",
         {"query": result.query, "count": result.count, "results": [hit.model_dump() for hit in result.results]},
         container,
@@ -467,7 +490,7 @@ def tasks_done(task_id: str, project: str | None = None, profile: str | None = N
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     result = container.tasks_service.done(task_id, project=resolved_project)
-    return _success("tasks.done", {"task": result.model_dump()}, container, project=resolved_project)
+    return _tool_result("tasks.done", {"task": result.model_dump()}, container, project=resolved_project)
 
 
 @mcp_app.tool(name="tasks_delete", description="Soft-delete a task")
@@ -475,7 +498,7 @@ def tasks_delete(task_id: str, project: str | None = None, profile: str | None =
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     result = container.tasks_service.delete(task_id, project=resolved_project)
-    return _success("tasks.delete", {"task": result.model_dump()}, container, project=resolved_project)
+    return _tool_result("tasks.delete", {"task": result.model_dump()}, container, project=resolved_project)
 
 
 @mcp_app.tool(name="files_index", description="Index live filesystem roots")
@@ -487,7 +510,7 @@ def files_index(
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     result = container.files_service.index(roots=roots, project=resolved_project)
-    return _success("files.index", result.model_dump(), container, project=resolved_project)
+    return _tool_result("files.index", result.model_dump(), container, project=resolved_project)
 
 
 @mcp_app.tool(name="files_get", description="Get one indexed file by id or path")
@@ -506,7 +529,7 @@ def files_get(
     try:
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
-        return _error("files.get", "INVALID_ARGS", str(exc))
+        return _failure("files.get", "INVALID_ARGS", str(exc), container)
     try:
         result: FilesGetResult = container.files_service.get(
             file_id=file_id,
@@ -517,10 +540,10 @@ def files_get(
             project=resolved_project,
         )
     except LookupError as exc:
-        return _error("files.get", "NOT_FOUND", str(exc))
+        return _failure("files.get", "NOT_FOUND", str(exc), container)
     except ValueError as exc:
-        return _error("files.get", "INVALID_ARGS", str(exc))
-    return _success("files.get", {"file": result.file.model_dump()}, container, project=resolved_project, extra_meta={"view": resolved_view})
+        return _failure("files.get", "INVALID_ARGS", str(exc), container)
+    return _tool_result("files.get", {"file": result.file.model_dump()}, container, project=resolved_project, extra_meta={"view": resolved_view})
 
 
 @mcp_app.tool(name="files_delete", description="Delete one indexed file by id or path")
@@ -545,10 +568,10 @@ def files_delete(
             project=resolved_project,
         )
     except LookupError as exc:
-        return _error("files.delete", "NOT_FOUND", str(exc))
+        return _failure("files.delete", "NOT_FOUND", str(exc), container)
     except ValueError as exc:
-        return _error("files.delete", "INVALID_ARGS", str(exc))
-    return _success("files.delete", {"file": result.file.model_dump()}, container, project=resolved_project)
+        return _failure("files.delete", "INVALID_ARGS", str(exc), container)
+    return _tool_result("files.delete", {"file": result.file.model_dump()}, container, project=resolved_project)
 
 
 @mcp_app.tool(name="files_list", description="List indexed files in the current project")
@@ -567,7 +590,7 @@ def files_list(
     try:
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
-        return _error("files.list", "INVALID_ARGS", str(exc))
+        return _failure("files.list", "INVALID_ARGS", str(exc), container)
     result: FilesListResult = container.files_service.list(
         limit=limit,
         cursor=cursor,
@@ -577,7 +600,7 @@ def files_list(
         project=resolved_project,
         view=resolved_view,
     )
-    return _success(
+    return _tool_result(
         "files.list",
         {
             "count": result.count,
@@ -607,7 +630,7 @@ def files_search(
     try:
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
-        return _error("files.search", "INVALID_ARGS", str(exc))
+        return _failure("files.search", "INVALID_ARGS", str(exc), container)
     result = container.files_service.search(
         query=query,
         limit=limit,
@@ -618,7 +641,7 @@ def files_search(
         project=resolved_project,
         view=resolved_view,
     )
-    return _success(
+    return _tool_result(
         "files.search",
         {
             "query": result.query,
@@ -664,7 +687,7 @@ def search(
         data = result.model_dump(exclude_none=True)
         if not explain and isinstance(data, dict):
             data.pop("stats", None)
-        return build_success_payload(
+        return _tool_result(
             "search",
             data,
             container,
@@ -677,7 +700,7 @@ def search(
             },
         )
     except ValueError as exc:
-        return _error("search", "INVALID_ARGS", str(exc))
+        return _failure("search", "INVALID_ARGS", str(exc), container)
 
 
 def run_stdio() -> None:

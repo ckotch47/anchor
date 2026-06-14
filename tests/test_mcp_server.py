@@ -24,6 +24,12 @@ from anchor.mcp_server import (
 )
 
 
+def _structured(result: object) -> dict[str, object]:
+    structured = getattr(result, "structuredContent", None)
+    assert isinstance(structured, dict)
+    return structured
+
+
 class McpServerTest(unittest.TestCase):
     def test_mcp_exposes_core_tools(self) -> None:
         async def run() -> list[str]:
@@ -71,23 +77,31 @@ class McpServerTest(unittest.TestCase):
                     files_list_payload = files_list(project="repo-a", view="full")
                     files_search_payload = files_search(query="greet", project="repo-a", view="full", explain=True)
 
-        self.assertIn("body", notes_list_payload["data"]["notes"][0])
-        self.assertIn("body", notes_search_payload["data"]["results"][0]["note"])
-        self.assertIn("body", tasks_list_payload["data"]["tasks"][0])
-        self.assertIn("body", tasks_search_payload["data"]["results"][0]["task"])
-        self.assertIn("payload", history_search_payload["data"]["results"][0]["history"])
-        self.assertIn("content_hash", files_get_payload["data"]["file"])
-        self.assertIn("content_hash", files_list_payload["data"]["files"][0])
-        self.assertIn("content_hash", files_search_payload["data"]["results"][0]["file"])
-        self.assertIn("stats", files_search_payload["data"])
-        self.assertEqual(notes_list_payload["meta"]["view"], "full")
-        self.assertEqual(notes_search_payload["meta"]["view"], "full")
-        self.assertEqual(tasks_list_payload["meta"]["view"], "full")
-        self.assertEqual(tasks_search_payload["meta"]["view"], "full")
-        self.assertEqual(history_search_payload["meta"]["view"], "full")
-        self.assertEqual(files_get_payload["meta"]["view"], "full")
-        self.assertEqual(files_list_payload["meta"]["view"], "full")
-        self.assertEqual(files_search_payload["meta"]["view"], "full")
+        self.assertEqual(notes_list_payload.content, [])
+        self.assertEqual(notes_search_payload.content, [])
+        self.assertEqual(tasks_list_payload.content, [])
+        self.assertEqual(tasks_search_payload.content, [])
+        self.assertEqual(history_search_payload.content, [])
+        self.assertEqual(files_get_payload.content, [])
+        self.assertEqual(files_list_payload.content, [])
+        self.assertEqual(files_search_payload.content, [])
+        self.assertIn("body", _structured(notes_list_payload)["data"]["notes"][0])
+        self.assertIn("body", _structured(notes_search_payload)["data"]["results"][0]["note"])
+        self.assertIn("body", _structured(tasks_list_payload)["data"]["tasks"][0])
+        self.assertIn("body", _structured(tasks_search_payload)["data"]["results"][0]["task"])
+        self.assertIn("payload", _structured(history_search_payload)["data"]["results"][0]["history"])
+        self.assertIn("content_hash", _structured(files_get_payload)["data"]["file"])
+        self.assertIn("content_hash", _structured(files_list_payload)["data"]["files"][0])
+        self.assertIn("content_hash", _structured(files_search_payload)["data"]["results"][0]["file"])
+        self.assertIn("stats", _structured(files_search_payload)["data"])
+        self.assertEqual(_structured(notes_list_payload)["meta"]["view"], "full")
+        self.assertEqual(_structured(notes_search_payload)["meta"]["view"], "full")
+        self.assertEqual(_structured(tasks_list_payload)["meta"]["view"], "full")
+        self.assertEqual(_structured(tasks_search_payload)["meta"]["view"], "full")
+        self.assertEqual(_structured(history_search_payload)["meta"]["view"], "full")
+        self.assertEqual(_structured(files_get_payload)["meta"]["view"], "full")
+        self.assertEqual(_structured(files_list_payload)["meta"]["view"], "full")
+        self.assertEqual(_structured(files_search_payload)["meta"]["view"], "full")
 
     def test_mcp_notes_and_tasks_list_expose_next_cursor(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -103,12 +117,14 @@ class McpServerTest(unittest.TestCase):
                     notes_payload = notes_list(project=None, limit=1)
                     tasks_payload = tasks_list(project="repo-a", limit=1)
 
-        self.assertTrue(notes_payload["ok"])
-        self.assertEqual(notes_payload["command"], "notes.list")
-        self.assertIn("next_cursor", notes_payload["data"])
-        self.assertTrue(tasks_payload["ok"])
-        self.assertEqual(tasks_payload["command"], "tasks.list")
-        self.assertIn("next_cursor", tasks_payload["data"])
+        self.assertEqual(notes_payload.content, [])
+        self.assertEqual(tasks_payload.content, [])
+        self.assertTrue(_structured(notes_payload)["ok"])
+        self.assertEqual(_structured(notes_payload)["command"], "notes.list")
+        self.assertIn("next_cursor", _structured(notes_payload)["data"])
+        self.assertTrue(_structured(tasks_payload)["ok"])
+        self.assertEqual(_structured(tasks_payload)["command"], "tasks.list")
+        self.assertIn("next_cursor", _structured(tasks_payload)["data"])
 
     def test_mcp_files_delete_removes_visibility(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -125,11 +141,14 @@ class McpServerTest(unittest.TestCase):
                     list_payload = files_list(project="repo-a")
                     search_payload = files_search(query="greet", project="repo-a")
 
-        self.assertTrue(deleted_payload["ok"])
-        self.assertEqual(deleted_payload["command"], "files.delete")
-        self.assertEqual(deleted_payload["data"]["file"]["path"], str((root / "app.py").resolve()))
-        self.assertEqual(list_payload["data"]["count"], 0)
-        self.assertEqual(search_payload["data"]["count"], 0)
+        self.assertEqual(deleted_payload.content, [])
+        self.assertEqual(list_payload.content, [])
+        self.assertEqual(search_payload.content, [])
+        self.assertTrue(_structured(deleted_payload)["ok"])
+        self.assertEqual(_structured(deleted_payload)["command"], "files.delete")
+        self.assertEqual(_structured(deleted_payload)["data"]["file"]["path"], str((root / "app.py").resolve()))
+        self.assertEqual(_structured(list_payload)["data"]["count"], 0)
+        self.assertEqual(_structured(search_payload)["data"]["count"], 0)
 
     def test_mcp_files_list_exposes_next_cursor(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -145,9 +164,10 @@ class McpServerTest(unittest.TestCase):
                     files_index(roots=[str(root)], project="repo-a")
                     list_payload = files_list(project="repo-a", limit=1)
 
-        self.assertTrue(list_payload["ok"])
-        self.assertEqual(list_payload["command"], "files.list")
-        self.assertIn("next_cursor", list_payload["data"])
+        self.assertEqual(list_payload.content, [])
+        self.assertTrue(_structured(list_payload)["ok"])
+        self.assertEqual(_structured(list_payload)["command"], "files.list")
+        self.assertIn("next_cursor", _structured(list_payload)["data"])
 
     def test_mcp_invalid_view_returns_machine_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -157,7 +177,8 @@ class McpServerTest(unittest.TestCase):
                 with patch("anchor.container.default_database_path", return_value=db_path):
                     payload = notes_list(view="detailed")
 
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["command"], "notes.list")
-        self.assertEqual(payload["error"]["code"], "INVALID_ARGS")
-        self.assertIn("compact", payload["error"]["message"])
+        self.assertEqual(payload.content, [])
+        self.assertFalse(_structured(payload)["ok"])
+        self.assertEqual(_structured(payload)["command"], "notes.list")
+        self.assertEqual(_structured(payload)["error"]["code"], "INVALID_ARGS")
+        self.assertIn("compact", _structured(payload)["error"]["message"])
