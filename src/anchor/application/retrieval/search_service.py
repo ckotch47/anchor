@@ -4,6 +4,7 @@ import base64
 import json
 from collections import OrderedDict
 
+from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.files.models import FilesSearchResult
 from anchor.application.files.service import FilesService
 from anchor.application.history.models import HistorySearchResult
@@ -27,12 +28,14 @@ class SearchService:
         tasks_service: TasksService,
         files_service: FilesService,
         *,
+        embedding_service: EmbeddingService | None = None,
         budget_tokens: int = 800,
     ) -> None:
         self._notes_service = notes_service
         self._history_service = history_service
         self._tasks_service = tasks_service
         self._files_service = files_service
+        self._embedding_service = embedding_service
         self._budget_tokens = budget_tokens
 
     def search(self, search_query: SearchQuery) -> SearchResult:
@@ -41,6 +44,8 @@ class SearchService:
             raise ValueError(f"unsupported search types: {', '.join(unsupported)}")
         requested_types = search_query.types or ["notes", "tasks", "history", "files"]
         requested_projects = search_query.projects or [search_query.project]
+        prefer_lexical_only = self._prefer_lexical_only(search_query.query)
+        query_embedding = self._resolve_query_embedding(search_query.query, prefer_lexical_only)
         per_type_budgets = self._allocate_budgets(search_query.budget_tokens, requested_types, search_query.weights)
         project_count = len(requested_projects)
         per_project_candidate_limit = max(1, max(search_query.limit * 4, search_query.limit) // project_count)
@@ -55,6 +60,8 @@ class SearchService:
                         limit=per_project_candidate_limit,
                         project=project,
                         budget_tokens=per_project_budget,
+                        prefer_lexical_only=prefer_lexical_only,
+                        query_embedding=query_embedding,
                     )
                     candidate_counts[search_type] = candidate_counts.get(search_type, 0) + notes_result.count
                     candidates.extend(self._notes_hits(notes_result, project))
@@ -64,6 +71,7 @@ class SearchService:
                         limit=per_project_candidate_limit,
                         project=project,
                         budget_tokens=per_project_budget,
+                        query_embedding=query_embedding,
                     )
                     candidate_counts[search_type] = candidate_counts.get(search_type, 0) + tasks_result.count
                     candidates.extend(self._tasks_hits(tasks_result, project))
@@ -73,6 +81,8 @@ class SearchService:
                         limit=per_project_candidate_limit,
                         project=project,
                         budget_tokens=per_project_budget,
+                        prefer_lexical_only=prefer_lexical_only,
+                        query_embedding=query_embedding,
                     )
                     candidate_counts[search_type] = candidate_counts.get(search_type, 0) + history_result.count
                     candidates.extend(self._history_hits(history_result, project))
@@ -82,6 +92,8 @@ class SearchService:
                         limit=per_project_candidate_limit,
                         project=project,
                         budget_tokens=per_project_budget,
+                        prefer_lexical_only=prefer_lexical_only,
+                        query_embedding=query_embedding,
                     )
                     candidate_counts[search_type] = candidate_counts.get(search_type, 0) + files_result.count
                     candidates.extend(self._files_hits(files_result, project))
@@ -235,6 +247,18 @@ class SearchService:
             remaining -= share
             allocations[search_type] = share
         return allocations
+
+    @staticmethod
+    def _prefer_lexical_only(query: str) -> bool:
+        return count_tokens(query) <= 1 or len(query.strip()) <= 4
+
+    def _resolve_query_embedding(self, query: str, prefer_lexical_only: bool) -> list[float] | None:
+        if prefer_lexical_only or self._embedding_service is None:
+            return None
+        try:
+            return self._embedding_service.embed_texts([query]).embeddings[0].embedding
+        except Exception:
+            return None
 
     @staticmethod
     def _encode_cursor(hit: SearchHit) -> str:

@@ -12,6 +12,8 @@ from anchor.application.tasks.models import TaskListItem, TaskSearchHit, TasksSe
 
 NOTE_ID = uuid7_str()
 NOTE_CHUNK_ID = uuid7_str()
+NOTE_SECOND_ID = uuid7_str()
+NOTE_SECOND_CHUNK_ID = uuid7_str()
 TASK_ID = uuid7_str()
 TASK_CHUNK_ID = uuid7_str()
 FILE_ID = uuid7_str()
@@ -29,8 +31,10 @@ class FakeNotesService:
         *,
         project: str | None = None,
         budget_tokens: int | None = None,
+        prefer_lexical_only: bool = False,
+        query_embedding: list[float] | None = None,
     ) -> NotesSearchResult:
-        del query, limit, budget_tokens
+        del query, limit, budget_tokens, prefer_lexical_only, query_embedding
         note = NoteSearchItem(
             id=NOTE_ID,
             project=project or "repo-a",
@@ -60,8 +64,10 @@ class FakeTasksService:
         *,
         project: str | None = None,
         budget_tokens: int | None = None,
+        prefer_lexical_only: bool = False,
+        query_embedding: list[float] | None = None,
     ) -> TasksSearchResult:
-        del query, limit, budget_tokens
+        del query, limit, budget_tokens, prefer_lexical_only, query_embedding
         return TasksSearchResult(
             query="deploy",
             count=1,
@@ -84,8 +90,10 @@ class FakeFilesService:
         *,
         project: str | None = None,
         budget_tokens: int | None = None,
+        prefer_lexical_only: bool = False,
+        query_embedding: list[float] | None = None,
     ) -> FilesSearchResult:
-        del query, limit, budget_tokens
+        del query, limit, budget_tokens, prefer_lexical_only, query_embedding
         return FilesSearchResult(
             query="deploy",
             count=1,
@@ -114,8 +122,10 @@ class FakeHistoryService:
         *,
         project: str | None = None,
         budget_tokens: int | None = None,
+        prefer_lexical_only: bool = False,
+        query_embedding: list[float] | None = None,
     ) -> HistorySearchResult:
-        del query, limit, budget_tokens
+        del query, limit, budget_tokens, prefer_lexical_only, query_embedding
         history = HistoryListItem(
             id=HISTORY_ID,
             project=project or "repo-a",
@@ -188,8 +198,10 @@ class SearchServiceTest(unittest.TestCase):
                 *,
                 project: str | None = None,
                 budget_tokens: int | None = None,
+                prefer_lexical_only: bool = False,
+                query_embedding: list[float] | None = None,
             ) -> NotesSearchResult:
-                del query, budget_tokens
+                del query, budget_tokens, prefer_lexical_only, query_embedding
                 items = [
                     NotesSearchHit(
                         note=NoteSearchItem(
@@ -205,13 +217,13 @@ class SearchServiceTest(unittest.TestCase):
                     ),
                     NotesSearchHit(
                         note=NoteSearchItem(
-                            id=uuid7_str(),
+                            id=NOTE_SECOND_ID,
                             project=project or "repo-a",
                             title="B",
                             pinned=False,
                             created_at="2026-06-13T00:00:00+00:00",
                         ),
-                        chunk_id=uuid7_str(),
+                        chunk_id=NOTE_SECOND_CHUNK_ID,
                         score=0.9,
                         snippet="b",
                     ),
@@ -254,8 +266,10 @@ class SearchServiceTest(unittest.TestCase):
                 *,
                 project: str | None = None,
                 budget_tokens: int | None = None,
+                prefer_lexical_only: bool = False,
+                query_embedding: list[float] | None = None,
             ) -> NotesSearchResult:
-                del query, limit, budget_tokens
+                del query, limit, budget_tokens, prefer_lexical_only, query_embedding
                 note = NoteSearchItem(
                     id=f"{project}-note",
                     project=project or "repo-a",
@@ -299,3 +313,116 @@ class SearchServiceTest(unittest.TestCase):
         self.assertEqual(result.count, 2)
         self.assertEqual({hit.project for hit in result.results}, {"repo-a", "repo-b"})
         self.assertEqual(result.stats.candidate_counts["notes"], 2)
+
+    def test_search_uses_lexical_fast_path_for_short_queries(self) -> None:
+        class FastPathNotesService:
+            def search(
+                self,
+                query: str,
+                limit: int = 20,
+                *,
+                project: str | None = None,
+                budget_tokens: int | None = None,
+                prefer_lexical_only: bool = False,
+                query_embedding: list[float] | None = None,
+            ) -> NotesSearchResult:
+                self.received_prefer_lexical_only = prefer_lexical_only
+                del query, limit, project, budget_tokens, query_embedding
+                note = NoteSearchItem(
+                    id=NOTE_ID,
+                    project="repo-a",
+                    title="Fast",
+                    pinned=False,
+                    created_at="2026-06-13T00:00:00+00:00",
+                )
+                return NotesSearchResult(
+                    query="te",
+                    count=1,
+                    results=[
+                        NotesSearchHit(
+                            note=note,
+                            chunk_id=NOTE_CHUNK_ID,
+                            score=0.5,
+                            snippet="fast path",
+                        )
+                    ],
+                )
+
+        notes_service = FastPathNotesService()
+        service = SearchService(notes_service, EmptyService(), EmptyService(), EmptyService(), budget_tokens=100)
+
+        service.search(SearchQuery(query="te", project="repo-a", types=["notes"], budget_tokens=100))
+
+        self.assertTrue(notes_service.received_prefer_lexical_only)
+
+    def test_search_computes_query_embedding_once_for_cross_entity_search(self) -> None:
+        class FakeEmbeddingResult:
+            def __init__(self, embedding: list[float]) -> None:
+                self.embedding = embedding
+
+        class FakeEmbeddingBatch:
+            def __init__(self, embedding: list[float]) -> None:
+                self.embeddings = [FakeEmbeddingResult(embedding)]
+
+        class FakeEmbeddingService:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def embed_texts(self, texts: list[str]) -> FakeEmbeddingBatch:
+                self.calls += 1
+                del texts
+                return FakeEmbeddingBatch([0.1, 0.2, 0.3])
+
+        class TrackingNotesService(FakeNotesService):
+            def __init__(self) -> None:
+                self.received_query_embedding: list[float] | None = None
+
+            def search(self, *args, **kwargs) -> NotesSearchResult:
+                self.received_query_embedding = kwargs.get("query_embedding")
+                return super().search(*args, **kwargs)
+
+        class TrackingHistoryService(FakeHistoryService):
+            def __init__(self) -> None:
+                self.received_query_embedding: list[float] | None = None
+
+            def search(self, *args, **kwargs) -> HistorySearchResult:
+                self.received_query_embedding = kwargs.get("query_embedding")
+                return super().search(*args, **kwargs)
+
+        class TrackingFilesService(FakeFilesService):
+            def __init__(self) -> None:
+                self.received_query_embedding: list[float] | None = None
+
+            def search(self, *args, **kwargs) -> FilesSearchResult:
+                self.received_query_embedding = kwargs.get("query_embedding")
+                return super().search(*args, **kwargs)
+
+        class TrackingTasksService(FakeTasksService):
+            def __init__(self) -> None:
+                self.received_query_embedding: list[float] | None = None
+
+            def search(self, *args, **kwargs) -> TasksSearchResult:
+                self.received_query_embedding = kwargs.get("query_embedding")
+                return super().search(*args, **kwargs)
+
+        notes_service = TrackingNotesService()
+        history_service = TrackingHistoryService()
+        tasks_service = TrackingTasksService()
+        files_service = TrackingFilesService()
+        embedding_service = FakeEmbeddingService()
+        service = SearchService(
+            notes_service,
+            history_service,
+            tasks_service,
+            files_service,
+            embedding_service=embedding_service,
+            budget_tokens=100,
+        )
+
+        service.search(SearchQuery(query="deploy plan", project="repo-a", budget_tokens=100))
+
+        self.assertEqual(embedding_service.calls, 1)
+        self.assertEqual(notes_service.received_query_embedding, [0.1, 0.2, 0.3])
+        self.assertEqual(history_service.received_query_embedding, [0.1, 0.2, 0.3])
+        self.assertEqual(tasks_service.received_query_embedding, [0.1, 0.2, 0.3])
+        self.assertEqual(files_service.received_query_embedding, [0.1, 0.2, 0.3])

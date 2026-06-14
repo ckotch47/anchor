@@ -134,15 +134,24 @@ class HistoryService:
         project: str | None = None,
         budget_tokens: int | None = None,
         view: str = "compact",
+        prefer_lexical_only: bool = False,
+        query_embedding: list[float] | None = None,
     ) -> HistorySearchResult:
         self._require_non_empty(query, "query")
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
         resolved_project = project or self._project
-        self._drain_pending_embeddings(resolved_project)
+        if not prefer_lexical_only:
+            self._drain_pending_embeddings(resolved_project)
         candidate_limit = max(limit * 4, limit)
-        candidates = self._collect_candidates(query, candidate_limit, resolved_project)
-        reranked_candidates = self._rerank_candidates(query, candidates)
+        candidates = self._collect_candidates(
+            query,
+            candidate_limit,
+            resolved_project,
+            prefer_lexical_only=prefer_lexical_only,
+            query_embedding=query_embedding,
+        )
+        reranked_candidates = self._rerank_candidates(query, candidates) if not prefer_lexical_only else candidates
         deduplicated = self._deduplicate_by_history(reranked_candidates)
         trimmed = self._trim_to_budget(
             deduplicated,
@@ -222,15 +231,25 @@ class HistoryService:
                 if hasattr(self._repository, "mark_embedding_index_error"):
                     self._repository.mark_embedding_index_error(document_id, last_error=str(exc))
 
-    def _collect_candidates(self, query: str, limit: int, project: str) -> list[HistorySearchCandidate]:
+    def _collect_candidates(
+        self,
+        query: str,
+        limit: int,
+        project: str,
+        *,
+        prefer_lexical_only: bool = False,
+        query_embedding: list[float] | None = None,
+    ) -> list[HistorySearchCandidate]:
         lexical_rows = self._search_lexical_candidates(query, limit, project)
         semantic_rows: list[HistorySearchCandidate] = []
-        if self._embedding_service is not None:
+        resolved_query_embedding = query_embedding
+        if resolved_query_embedding is None and self._embedding_service is not None and not prefer_lexical_only:
             try:
-                query_embedding = self._embedding_service.embed_texts([query]).embeddings[0].embedding
-                semantic_rows = self._search_vector_candidates(query_embedding, limit, project)
+                resolved_query_embedding = self._embedding_service.embed_texts([query]).embeddings[0].embedding
             except Exception:
-                semantic_rows = []
+                resolved_query_embedding = None
+        if resolved_query_embedding is not None and not prefer_lexical_only:
+            semantic_rows = self._search_vector_candidates(resolved_query_embedding, limit, project)
         merged: OrderedDict[str, HistorySearchCandidate] = OrderedDict()
         for candidate in [*lexical_rows, *semantic_rows]:
             current = merged.get(candidate.chunk_id)

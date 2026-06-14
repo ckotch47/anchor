@@ -284,6 +284,8 @@ class FilesService:
         root: str | None = None,
         language: str | None = None,
         path_prefix: str | None = None,
+        prefer_lexical_only: bool = False,
+        query_embedding: list[float] | None = None,
     ) -> FilesSearchResult:
         self._require_non_empty(query, "query")
         if limit <= 0:
@@ -292,7 +294,8 @@ class FilesService:
         resolved_root = self._normalize_root(root)
         resolved_language = self._normalize_language(language)
         resolved_path_prefix = self._normalize_path_prefix(path_prefix, resolved_root)
-        self._drain_pending_embeddings(resolved_project)
+        if not prefer_lexical_only:
+            self._drain_pending_embeddings(resolved_project)
         candidate_limit = max(limit * 4, limit)
         candidates = self._collect_candidates(
             query,
@@ -301,8 +304,10 @@ class FilesService:
             root=resolved_root,
             language=resolved_language,
             path_prefix=resolved_path_prefix,
+            prefer_lexical_only=prefer_lexical_only,
+            query_embedding=query_embedding,
         )
-        reranked_candidates = self._rerank_candidates(query, candidates)
+        reranked_candidates = self._rerank_candidates(query, candidates) if not prefer_lexical_only else candidates
         deduplicated = self._deduplicate_by_file(reranked_candidates)
         trimmed = self._trim_to_budget(
             deduplicated,
@@ -408,6 +413,8 @@ class FilesService:
         root: str | None = None,
         language: str | None = None,
         path_prefix: str | None = None,
+        prefer_lexical_only: bool = False,
+        query_embedding: list[float] | None = None,
     ) -> list[FileSearchCandidate]:
         lexical_rows = self._repository.search_lexical_candidates(
             query=query,
@@ -418,19 +425,21 @@ class FilesService:
             path_prefix=path_prefix,
         )
         semantic_rows: list[FileSearchCandidate] = []
-        if self._embedding_service is not None:
+        resolved_query_embedding = query_embedding
+        if resolved_query_embedding is None and self._embedding_service is not None and not prefer_lexical_only:
             try:
-                query_embedding = self._embedding_service.embed_texts([query]).embeddings[0].embedding
-                semantic_rows = self._repository.search_vector_candidates(
-                    query_embedding=query_embedding,
-                    limit=limit,
-                    project=project,
-                    root_path=root,
-                    language=language,
-                    path_prefix=path_prefix,
-                )
+                resolved_query_embedding = self._embedding_service.embed_texts([query]).embeddings[0].embedding
             except Exception:
-                semantic_rows = []
+                resolved_query_embedding = None
+        if resolved_query_embedding is not None and not prefer_lexical_only:
+            semantic_rows = self._repository.search_vector_candidates(
+                query_embedding=resolved_query_embedding,
+                limit=limit,
+                project=project,
+                root_path=root,
+                language=language,
+                path_prefix=path_prefix,
+            )
         merged: OrderedDict[str, FileSearchCandidate] = OrderedDict()
         for candidate in [*lexical_rows, *semantic_rows]:
             current = merged.get(candidate.chunk_id)

@@ -185,10 +185,12 @@ class TasksService:
         project: str | None = None,
         budget_tokens: int | None = None,
         view: str = "compact",
+        query_embedding: list[float] | None = None,
     ) -> TasksSearchResult:
         self._require_non_empty(query, "query")
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
+        del query_embedding
         results = self._trim_to_budget(
             self._repository.search(query=query, limit=limit, project=project or self._project),
             budget_tokens if budget_tokens is not None else self._budget_tokens,

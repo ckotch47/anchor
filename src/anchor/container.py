@@ -122,6 +122,7 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         history_service=history_service,
         tasks_service=tasks_service,
         files_service=files_service,
+        embedding_service=embedding_service,
         budget_tokens=config.runtime.default_budget_tokens,
     )
     if auto_migrate:
