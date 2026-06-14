@@ -16,10 +16,17 @@ def _parse_search_types(raw_types: str | None) -> list[str]:
     return [search_type.strip() for search_type in raw_types.split(",") if search_type.strip()]
 
 
+def _parse_projects(raw_projects: str | None) -> list[str] | None:
+    if raw_projects is None or not raw_projects.strip():
+        return None
+    return [project.strip() for project in raw_projects.split(",") if project.strip()]
+
+
 def _render_search_payload(
     result: object,
     container: object,
     resolved_project: str,
+    resolved_projects: list[str] | None,
     explain: bool,
     search_types: list[str],
     view: str | None,
@@ -36,7 +43,12 @@ def _render_search_payload(
                 data,
                 container,
                 view=view,
-                extra_meta={"project": resolved_project, "types": search_types, "explain": explain},
+                extra_meta={
+                    "project": resolved_project,
+                    "projects": resolved_projects or [resolved_project],
+                    "types": search_types,
+                    "explain": explain,
+                },
             ),
             ensure_ascii=False,
             indent=2,
@@ -49,6 +61,8 @@ def search_command(
     types: Annotated[str | None, typer.Option("--types")] = None,
     limit: Annotated[int, typer.Option("--limit")] = 20,
     budget_tokens: Annotated[int | None, typer.Option("--budget-tokens")] = None,
+    cursor: Annotated[str | None, typer.Option("--cursor")] = None,
+    projects: Annotated[str | None, typer.Option("--projects")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     view: Annotated[str | None, typer.Option("--view")] = None,
     explain: Annotated[bool, typer.Option("--explain")] = False,
@@ -62,12 +76,15 @@ def search_command(
             query=query,
             types=search_types,
             project=resolved_project,
+            projects=_parse_projects(projects),
             limit=limit,
             budget_tokens=budget_tokens if budget_tokens is not None else container.config.runtime.default_budget_tokens,
             explain=explain,
+            cursor=cursor,
         )
         result = container.search_service.search(search_query)
-        _render_search_payload(result, container, resolved_project, explain, search_types, view)
+        resolved_projects = search_query.projects or [resolved_project]
+        _render_search_payload(result, container, resolved_project, resolved_projects, explain, search_types, view)
     except ValueError as exc:
         emit_error("search", "INVALID_ARGS", str(exc))
     except Exception as exc:

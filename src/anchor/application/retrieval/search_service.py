@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from collections import OrderedDict
 
@@ -39,58 +40,74 @@ class SearchService:
         if unsupported:
             raise ValueError(f"unsupported search types: {', '.join(unsupported)}")
         requested_types = search_query.types or ["notes", "tasks", "history", "files"]
+        requested_projects = search_query.projects or [search_query.project]
         per_type_budgets = self._allocate_budgets(search_query.budget_tokens, requested_types, search_query.weights)
+        project_count = len(requested_projects)
+        per_project_candidate_limit = max(1, max(search_query.limit * 4, search_query.limit) // project_count)
         candidate_counts: dict[str, int] = {}
         candidates: list[SearchHit] = []
-        candidate_limit = max(search_query.limit * 4, search_query.limit)
         for search_type in requested_types:
-            if search_type == "notes":
-                notes_result = self._notes_service.search(
-                    search_query.query,
-                    limit=candidate_limit,
-                    project=search_query.project,
-                    budget_tokens=per_type_budgets[search_type],
-                )
-                candidate_counts[search_type] = notes_result.count
-                candidates.extend(self._notes_hits(notes_result, search_query.project))
-            elif search_type == "tasks":
-                tasks_result = self._tasks_service.search(
-                    search_query.query,
-                    limit=candidate_limit,
-                    project=search_query.project,
-                    budget_tokens=per_type_budgets[search_type],
-                )
-                candidate_counts[search_type] = tasks_result.count
-                candidates.extend(self._tasks_hits(tasks_result, search_query.project))
-            elif search_type == "history":
-                history_result = self._history_service.search(
-                    search_query.query,
-                    limit=candidate_limit,
-                    project=search_query.project,
-                    budget_tokens=per_type_budgets[search_type],
-                )
-                candidate_counts[search_type] = history_result.count
-                candidates.extend(self._history_hits(history_result, search_query.project))
-            elif search_type == "files":
-                files_result = self._files_service.search(
-                    search_query.query,
-                    limit=candidate_limit,
-                    project=search_query.project,
-                    budget_tokens=per_type_budgets[search_type],
-                )
-                candidate_counts[search_type] = files_result.count
-                candidates.extend(self._files_hits(files_result, search_query.project))
+            for project in requested_projects:
+                per_project_budget = max(1, per_type_budgets[search_type] // project_count)
+                if search_type == "notes":
+                    notes_result = self._notes_service.search(
+                        search_query.query,
+                        limit=per_project_candidate_limit,
+                        project=project,
+                        budget_tokens=per_project_budget,
+                    )
+                    candidate_counts[search_type] = candidate_counts.get(search_type, 0) + notes_result.count
+                    candidates.extend(self._notes_hits(notes_result, project))
+                elif search_type == "tasks":
+                    tasks_result = self._tasks_service.search(
+                        search_query.query,
+                        limit=per_project_candidate_limit,
+                        project=project,
+                        budget_tokens=per_project_budget,
+                    )
+                    candidate_counts[search_type] = candidate_counts.get(search_type, 0) + tasks_result.count
+                    candidates.extend(self._tasks_hits(tasks_result, project))
+                elif search_type == "history":
+                    history_result = self._history_service.search(
+                        search_query.query,
+                        limit=per_project_candidate_limit,
+                        project=project,
+                        budget_tokens=per_project_budget,
+                    )
+                    candidate_counts[search_type] = candidate_counts.get(search_type, 0) + history_result.count
+                    candidates.extend(self._history_hits(history_result, project))
+                elif search_type == "files":
+                    files_result = self._files_service.search(
+                        search_query.query,
+                        limit=per_project_candidate_limit,
+                        project=project,
+                        budget_tokens=per_project_budget,
+                    )
+                    candidate_counts[search_type] = candidate_counts.get(search_type, 0) + files_result.count
+                    candidates.extend(self._files_hits(files_result, project))
         deduplicated = self._deduplicate(candidates)
-        ordered = sorted(deduplicated, key=lambda item: item.score, reverse=True)
-        trimmed = self._trim_to_budget(ordered, search_query.budget_tokens)
+        ordered = sorted(
+            deduplicated,
+            key=lambda item: (-item.score, item.entity_type, item.entity_id),
+        )
+        filtered = self._apply_cursor(ordered, search_query.cursor)
+        trimmed = self._trim_to_budget(filtered, search_query.budget_tokens)
+        page = trimmed[: search_query.limit]
+        next_cursor = self._encode_cursor(page[-1]) if len(filtered) > len(page) and page else None
         stats = SearchStats(
             budget_tokens=search_query.budget_tokens,
-            consumed_tokens=self._estimate_consumed_tokens(trimmed),
+            consumed_tokens=self._estimate_consumed_tokens(page),
             candidate_counts=candidate_counts,
             deduplicated_count=len(deduplicated),
-            returned_count=len(trimmed),
+            returned_count=len(page),
         )
-        return SearchResult(query=search_query, count=len(trimmed), results=trimmed, stats=stats if search_query.explain else None)
+        return SearchResult(
+            query=search_query,
+            count=len(page),
+            results=page,
+            next_cursor=next_cursor,
+            stats=stats if search_query.explain else None,
+        )
 
     def _notes_hits(self, result: NotesSearchResult, project: str) -> list[SearchHit]:
         return [
@@ -213,3 +230,48 @@ class SearchService:
             remaining -= share
             allocations[search_type] = share
         return allocations
+
+    @staticmethod
+    def _encode_cursor(hit: SearchHit) -> str:
+        payload = json.dumps(
+            {
+                "score": hit.score,
+                "entity_type": hit.entity_type,
+                "entity_id": hit.entity_id,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _decode_cursor(cursor: str | None) -> tuple[float, str, str] | None:
+        if cursor is None or not cursor.strip():
+            return None
+        padding = "=" * (-len(cursor) % 4)
+        try:
+            raw_value = base64.urlsafe_b64decode(f"{cursor}{padding}".encode("ascii")).decode("utf-8")
+            payload = json.loads(raw_value)
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("cursor must be an opaque pagination token") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("cursor must be an opaque pagination token")
+        score = payload.get("score")
+        entity_type = payload.get("entity_type")
+        entity_id = payload.get("entity_id")
+        if not isinstance(score, (int, float)) or not isinstance(entity_type, str) or not isinstance(entity_id, str):
+            raise ValueError("cursor must be an opaque pagination token")
+        return float(score), entity_type, entity_id
+
+    def _apply_cursor(self, hits: list[SearchHit], cursor: str | None) -> list[SearchHit]:
+        decoded = self._decode_cursor(cursor)
+        if decoded is None:
+            return hits
+        cursor_score, cursor_type, cursor_id = decoded
+        filtered: list[SearchHit] = []
+        for hit in hits:
+            current_key = (-hit.score, hit.entity_type, hit.entity_id)
+            cursor_key = (-cursor_score, cursor_type, cursor_id)
+            if current_key > cursor_key:
+                filtered.append(hit)
+        return filtered

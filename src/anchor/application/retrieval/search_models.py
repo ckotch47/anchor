@@ -40,4 +40,5 @@ class SearchResult(BaseModel):
     query: SearchQuery
     count: int
     results: list[SearchHit]
+    next_cursor: str | None = None
     stats: SearchStats | None = None

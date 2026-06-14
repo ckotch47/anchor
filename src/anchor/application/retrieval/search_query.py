@@ -12,10 +12,12 @@ class SearchQuery(BaseModel):
     query: str
     types: list[str] = Field(default_factory=lambda: ["notes", "tasks", "history", "files"])
     project: str
+    projects: list[str] | None = None
     limit: int = 20
     budget_tokens: int = 800
     weights: dict[str, float] = Field(default_factory=dict)
     explain: bool = False
+    cursor: str | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> SearchQuery:
@@ -25,10 +27,14 @@ class SearchQuery(BaseModel):
         self.project = self.project.strip()
         if not self.project:
             raise ValueError("project must not be empty")
+        if self.projects is not None:
+            self.projects = _normalize_projects(self.projects)
         if self.limit <= 0:
             raise ValueError("limit must be greater than zero")
         if self.budget_tokens <= 0:
             raise ValueError("budget_tokens must be greater than zero")
+        if self.cursor is not None and not self.cursor.strip():
+            self.cursor = None
         self.types = _normalize_search_types(self.types)
         if self.weights:
             normalized_weights: dict[str, float] = {}
@@ -62,4 +68,17 @@ def _normalize_search_types(raw_types: list[str]) -> list[str]:
             normalized.append(normalized_type)
     if not normalized:
         raise ValueError("types must not be empty")
+    return normalized
+
+
+def _normalize_projects(raw_projects: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for raw_project in raw_projects:
+        normalized_project = raw_project.strip()
+        if not normalized_project:
+            continue
+        if normalized_project not in normalized:
+            normalized.append(normalized_project)
+    if not normalized:
+        raise ValueError("projects must not be empty")
     return normalized

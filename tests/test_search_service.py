@@ -138,6 +138,12 @@ class FakeHistoryService:
         )
 
 
+class EmptyService:
+    def search(self, *args, **kwargs):
+        del args, kwargs
+        return NotesSearchResult(query="deploy", count=0, results=[])
+
+
 class SearchServiceTest(unittest.TestCase):
     def test_search_combines_notes_tasks_history_and_files(self) -> None:
         service = SearchService(
@@ -172,3 +178,124 @@ class SearchServiceTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             service.search(SearchQuery(query="deploy", project="repo-a", types=["unknown"], budget_tokens=100))
+
+    def test_search_supports_cursor_pagination(self) -> None:
+        class PagingNotesService:
+            def search(
+                self,
+                query: str,
+                limit: int = 20,
+                *,
+                project: str | None = None,
+                budget_tokens: int | None = None,
+            ) -> NotesSearchResult:
+                del query, budget_tokens
+                items = [
+                    NotesSearchHit(
+                        note=NoteSearchItem(
+                            id=NOTE_ID,
+                            project=project or "repo-a",
+                            title="A",
+                            pinned=False,
+                            created_at="2026-06-13T00:00:00+00:00",
+                        ),
+                        chunk_id=NOTE_CHUNK_ID,
+                        score=0.9,
+                        snippet="a",
+                    ),
+                    NotesSearchHit(
+                        note=NoteSearchItem(
+                            id=uuid7_str(),
+                            project=project or "repo-a",
+                            title="B",
+                            pinned=False,
+                            created_at="2026-06-13T00:00:00+00:00",
+                        ),
+                        chunk_id=uuid7_str(),
+                        score=0.9,
+                        snippet="b",
+                    ),
+                ]
+                return NotesSearchResult(query="deploy", count=len(items), results=items[:limit])
+
+        service = SearchService(
+            PagingNotesService(),
+            EmptyService(),
+            EmptyService(),
+            EmptyService(),
+            budget_tokens=100,
+        )
+
+        first_page = service.search(
+            SearchQuery(query="deploy", project="repo-a", types=["notes"], limit=1, budget_tokens=100)
+        )
+        second_page = service.search(
+            SearchQuery(
+                query="deploy",
+                project="repo-a",
+                types=["notes"],
+                limit=1,
+                budget_tokens=100,
+                cursor=first_page.next_cursor,
+            )
+        )
+
+        self.assertEqual(first_page.count, 1)
+        self.assertIsNotNone(first_page.next_cursor)
+        self.assertEqual(second_page.count, 1)
+        self.assertIsNone(second_page.next_cursor)
+
+    def test_search_supports_explicit_cross_project_scope(self) -> None:
+        class CrossProjectNotesService:
+            def search(
+                self,
+                query: str,
+                limit: int = 20,
+                *,
+                project: str | None = None,
+                budget_tokens: int | None = None,
+            ) -> NotesSearchResult:
+                del query, limit, budget_tokens
+                note = NoteSearchItem(
+                    id=f"{project}-note",
+                    project=project or "repo-a",
+                    title=f"{project} note",
+                    pinned=False,
+                    created_at="2026-06-13T00:00:00+00:00",
+                )
+                return NotesSearchResult(
+                    query="deploy",
+                    count=1,
+                    results=[
+                        NotesSearchHit(
+                            note=note,
+                            chunk_id=f"{project}-chunk",
+                            score=0.9,
+                            snippet=f"{project} snippet",
+                        )
+                    ],
+                )
+
+        service = SearchService(
+            CrossProjectNotesService(),
+            EmptyService(),
+            EmptyService(),
+            EmptyService(),
+            budget_tokens=100,
+        )
+
+        result = service.search(
+            SearchQuery(
+                query="deploy",
+                project="repo-a",
+                projects=["repo-a", "repo-b"],
+                types=["notes"],
+                limit=10,
+                budget_tokens=100,
+                explain=True,
+            )
+        )
+
+        self.assertEqual(result.count, 2)
+        self.assertEqual({hit.project for hit in result.results}, {"repo-a", "repo-b"})
+        self.assertEqual(result.stats.candidate_counts["notes"], 2)
