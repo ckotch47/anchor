@@ -33,6 +33,7 @@ class McpServerTest(unittest.TestCase):
         tool_names = asyncio.run(run())
 
         self.assertIn("health", tool_names)
+        self.assertIn("db_compact", tool_names)
         self.assertIn("search", tool_names)
         self.assertIn("notes_add", tool_names)
         self.assertIn("history_append", tool_names)
@@ -88,6 +89,27 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(files_list_payload["meta"]["view"], "full")
         self.assertEqual(files_search_payload["meta"]["view"], "full")
 
+    def test_mcp_notes_and_tasks_list_expose_next_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            db_path = Path(tmpdir) / "anchor.sqlite3"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=db_path):
+                    notes_add(title="Note one", body="Body one", source="cli")
+                    notes_add(title="Note two", body="Body two", source="cli")
+                    tasks_add(title="Task one", body="Body one", project="repo-a")
+                    tasks_add(title="Task two", body="Body two", project="repo-a")
+
+                    notes_payload = notes_list(project=None, limit=1)
+                    tasks_payload = tasks_list(project="repo-a", limit=1)
+
+        self.assertTrue(notes_payload["ok"])
+        self.assertEqual(notes_payload["command"], "notes.list")
+        self.assertIn("next_cursor", notes_payload["data"])
+        self.assertTrue(tasks_payload["ok"])
+        self.assertEqual(tasks_payload["command"], "tasks.list")
+        self.assertIn("next_cursor", tasks_payload["data"])
+
     def test_mcp_files_delete_removes_visibility(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "repo"
@@ -108,6 +130,24 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(deleted_payload["data"]["file"]["path"], str((root / "app.py").resolve()))
         self.assertEqual(list_payload["data"]["count"], 0)
         self.assertEqual(search_payload["data"]["count"], 0)
+
+    def test_mcp_files_list_exposes_next_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            (root / "app.py").write_text("def greet():\n    return 'hello'\n", encoding="utf-8")
+            (root / "beta.py").write_text("def beta():\n    return 'beta'\n", encoding="utf-8")
+
+            config_path = Path(tmpdir) / "config.toml"
+            db_path = Path(tmpdir) / "anchor.sqlite3"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=db_path):
+                    files_index(roots=[str(root)], project="repo-a")
+                    list_payload = files_list(project="repo-a", limit=1)
+
+        self.assertTrue(list_payload["ok"])
+        self.assertEqual(list_payload["command"], "files.list")
+        self.assertIn("next_cursor", list_payload["data"])
 
     def test_mcp_invalid_view_returns_machine_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
