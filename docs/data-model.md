@@ -10,6 +10,7 @@ Anchor uses one SQLite database with a shared document spine and separate domain
   - `id`
   - `project`
   - `metatags`
+  - `correlation_id`
   - `document_type`
   - `title`
   - `body`
@@ -22,6 +23,7 @@ Anchor uses one SQLite database with a shared document spine and separate domain
   - `document_id`
   - `project`
   - `metatags`
+  - `correlation_id`
   - `note_kind`
   - `pinned`
   - `archived_at`
@@ -29,6 +31,7 @@ Anchor uses one SQLite database with a shared document spine and separate domain
   - `document_id`
   - `project`
   - `metatags`
+  - `correlation_id`
   - `task_kind`
   - `status`
   - `priority`
@@ -49,7 +52,7 @@ Anchor uses one SQLite database with a shared document spine and separate domain
 - `document_tags`
   - filtering and coarse retrieval
 - `document_links`
-  - context graph for related records and agent follow-up
+  - typed context graph for related records and agent follow-up
 
 Derived and operational tables:
 
@@ -71,8 +74,10 @@ Derived and operational tables:
 - `documents.body` is the canonical text source.
 - `project` is duplicated on `documents`, `notes`, `tasks`, and `history_entries` so scoping never depends on join-time inference.
 - `metatags` is duplicated on `documents`, `notes`, `tasks`, and `history_entries` as SQLite JSON text, not PostgreSQL `jsonb`.
+- `correlation_id` is stored on the shared `documents` spine and on `history_entries` so agent activity can be traced across operations.
 - `notes`, `tasks`, and `history_entries` hold domain-specific state.
 - `tasks` support one-parent nesting and one-primary-blocker references directly, while `document_links` remains the general graph for richer cross-entity relations.
+- `document_links.link_type` is the typed relation discriminator for the graph layer.
 - `memory` is a read model over the domain tables, not a separate source of truth.
 - Derived search data must be rebuildable from the canonical tables.
 - Primary ids and opaque reference ids are UUIDv7 strings: entity ids, chunk ids, `parent_document_id`, `blocked_by_document_id`, and `correlation_id`.

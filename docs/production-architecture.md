@@ -41,7 +41,7 @@ Each context should have its own service and its own table(s), not a single poly
 Use a shared document spine plus domain tables.
 
 - `documents`
-  - canonical row for text, timestamps, source, stable identifiers, project scope, and metatags
+  - canonical row for text, timestamps, source, stable identifiers, project scope, metatags, and correlation ids
   - shared by notes, tasks, and history
 - `notes`
   - note-specific metadata, project scope, metatags, and relationships
@@ -52,7 +52,7 @@ Use a shared document spine plus domain tables.
 - `document_tags`
   - filtering and coarse retrieval
 - `document_links`
-  - related context and graph traversal
+  - typed related context and graph traversal
 
 Derived and operational tables:
 
@@ -137,8 +137,11 @@ Fallback rules:
 ## Project scope contract
 
 - `project` and `metatags` are duplicated into every domain entity so list/search operations can scope locally without extra joins.
+- `correlation_id` is stored on the shared document spine so agent activity can be traced without adding transport-specific state.
 - `tasks` should support common task relationships directly, while `document_links` remains the richer graph for cross-entity references and follow-up context.
 - `metatags` is stored as SQLite JSON text and treated as queryable metadata, not as PostgreSQL `jsonb`.
+- `metadata.entities` in config defines typed metatag schemas for entities that need validation.
+- `links.relation_types` in config defines the allowed typed relation kinds for `document_links`.
 - Search should scope by `project` first, then document type, then any metatag filters, and only then run lexical/vector/rerank ranking.
 - Cross-project search is an explicit opt-in via the query contract, not the default path.
 - Filesystem retrieval should scope by project and root path before indexing, then apply ignore rules before any chunking or ranking.

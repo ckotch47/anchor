@@ -18,6 +18,7 @@
 - implement `notes` as the first domain slice, then `tasks` and `history`
 - add domain-specific tables for each context
 - add shared `project` and `metatags` columns to every domain entity so all commands can scope and filter locally
+- add shared `correlation_id` on the document spine for traceable agent activity
 - add direct task-link fields for nesting and blocking, while keeping `document_links` as the general graph
 - add create/list/search/show/update flows
 - add link support between documents
@@ -36,6 +37,7 @@
 - add dedup by document before returning results
 - add budget trim before response emission
 - add compact projection commands to avoid full-context responses
+- add typed metatag schema validation and typed relation kinds in config
 
 ## Phase 4: Operations and resilience
 
