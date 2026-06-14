@@ -9,7 +9,7 @@ from unittest.mock import patch
 from typer import Exit
 
 from anchor.adapters.sqlite_ids import uuid7_str
-from anchor.cli import tasks_add, tasks_delete, tasks_done, tasks_list, tasks_search, tasks_update
+from anchor.cli import tasks_add, tasks_delete, tasks_done, tasks_get, tasks_list, tasks_search, tasks_update
 
 
 class TasksCliTest(unittest.TestCase):
@@ -84,6 +84,26 @@ class TasksCliTest(unittest.TestCase):
         self.assertEqual(update_payload["data"]["task"]["priority"], 5)
         self.assertEqual(update_payload["data"]["task"]["project"], "repo-a")
 
+    def test_tasks_get_emit_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            db_path = Path(tmpdir) / "anchor.sqlite3"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=db_path):
+                    with patch("typer.echo") as add_echo_mock:
+                        tasks_add(title="Get me", body="Task body", project="repo-a")
+                    task_id = json.loads(add_echo_mock.call_args.args[0])["data"]["task"]["id"]
+
+                    with patch("typer.echo") as get_echo_mock:
+                        tasks_get(task_id=task_id, project="repo-a")
+
+        get_payload = json.loads(get_echo_mock.call_args.args[0])
+        self.assertTrue(get_payload["ok"])
+        self.assertEqual(get_payload["command"], "tasks.get")
+        self.assertEqual(get_payload["data"]["task"]["id"], task_id)
+        self.assertEqual(get_payload["data"]["task"]["title"], "Get me")
+        self.assertNotIn("project", get_payload["meta"])
+
     def test_tasks_search_emit_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.toml"
@@ -135,4 +155,4 @@ class TasksCliTest(unittest.TestCase):
         self.assertTrue(delete_payload["ok"])
         self.assertEqual(delete_payload["command"], "tasks.delete")
         self.assertEqual(delete_payload["data"]["task"]["id"], task_id)
-        self.assertEqual(delete_payload["meta"]["project"], "repo-a")
+        self.assertNotIn("project", delete_payload["meta"])

@@ -116,6 +116,13 @@ class TasksService:
             raise LookupError(f"task not found: {task_id}")
         return result
 
+    def get(self, task_id: str, *, project: str | None = None) -> TaskRecord:
+        self._require_non_empty(task_id, "id")
+        task = self._repository.get(task_id, project=project or self._project)
+        if task is None:
+            raise LookupError(f"task not found: {task_id}")
+        return task
+
     def list(
         self,
         limit: int = 20,

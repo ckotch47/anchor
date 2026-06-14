@@ -10,7 +10,16 @@ from anchor.cli_history import history_app, history_append, history_delete, hist
 from anchor.cli_notes import notes_add, notes_app, notes_delete, notes_get, notes_list, notes_search, notes_update
 from anchor.cli_search import search_command
 from anchor.cli_shared import response_formatter
-from anchor.cli_tasks import tasks_add, tasks_app, tasks_delete, tasks_done, tasks_list, tasks_search, tasks_update
+from anchor.cli_tasks import (
+    tasks_add,
+    tasks_app,
+    tasks_delete,
+    tasks_done,
+    tasks_get,
+    tasks_list,
+    tasks_search,
+    tasks_update,
+)
 from anchor.container import build_container
 from anchor.mcp_server import run_stdio
 
@@ -46,6 +55,7 @@ __all__ = [
     "tasks_add",
     "tasks_delete",
     "tasks_done",
+    "tasks_get",
     "tasks_list",
     "tasks_search",
     "tasks_update",
@@ -68,7 +78,6 @@ def health(
             "data": result.model_dump(),
             "meta": {
                 "view": container.config.runtime.default_view,
-                "profile": container.profile_name,
             },
         }
         typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -141,19 +150,7 @@ def _handle_config_init(container: Any, force: bool = False) -> None:
     result = container.config_service.init(force=force)
     typer.echo(
         json.dumps(
-            {
-                "ok": True,
-                "command": "config.init",
-                "data": {
-                    "config": result.config.model_dump(),
-                    "config_path": result.config_path,
-                    "profile_name": result.profile_name,
-                },
-                "meta": {
-                    "view": result.config.runtime.default_view,
-                    "profile": container.profile_name,
-                },
-            },
+            response_formatter.format_config("config.init", result, container),
             ensure_ascii=False,
             indent=2,
         )
@@ -214,7 +211,6 @@ def _handle_db_migrate(container: Any) -> None:
         },
         "meta": {
             "view": container.config.runtime.default_view,
-            "profile": container.profile_name,
         },
     }
     typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -247,7 +243,6 @@ def _handle_db_compact(
         "data": result.model_dump(),
         "meta": {
             "view": container.config.runtime.default_view,
-            "profile": container.profile_name,
         },
     }
     typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))

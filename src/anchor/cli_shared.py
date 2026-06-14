@@ -25,6 +25,13 @@ class ResponseEnvelopeFormatter:
         }
 
     def format_config(self, command: str, result: ConfigResult, container: Any) -> dict[str, Any]:
+        meta: dict[str, Any] = {
+            "view": result.config.runtime.default_view,
+        }
+        if result.config.runtime.default_view == "full":
+            resolved_profile = result.profile_name or container.profile_name
+            if resolved_profile is not None:
+                meta["profile"] = resolved_profile
         return {
             "ok": True,
             "command": command,
@@ -33,10 +40,7 @@ class ResponseEnvelopeFormatter:
                 "config_path": result.config_path,
                 "profile_name": result.profile_name,
             },
-            "meta": {
-                "view": result.config.runtime.default_view,
-                "profile": result.profile_name or container.profile_name,
-            },
+            "meta": meta,
         }
 
     def format_success(
@@ -51,16 +55,19 @@ class ResponseEnvelopeFormatter:
         extra_meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         resolved_view = resolve_view(container, view)
-        if include_config_path is None:
-            include_config_path = resolved_view == "full"
         meta: dict[str, Any] = {
             "view": resolved_view,
-            "profile": profile or container.profile_name,
         }
-        if include_config_path:
-            meta["config_path"] = str(container.config_path)
-        if extra_meta:
-            meta.update(extra_meta)
+        if resolved_view == "full":
+            if include_config_path is None:
+                include_config_path = True
+            resolved_profile = profile or container.profile_name
+            if resolved_profile is not None:
+                meta["profile"] = resolved_profile
+            if include_config_path:
+                meta["config_path"] = str(container.config_path)
+            if extra_meta:
+                meta.update(extra_meta)
         return {
             "ok": True,
             "command": command,
@@ -92,18 +99,20 @@ class ResponseEnvelopeFormatter:
             data.pop("stats", None)
         meta: dict[str, Any] = {
             "view": resolved_view,
-            "profile": profile or container.profile_name,
         }
         if resolved_view == "full":
+            resolved_profile = profile or container.profile_name
+            if resolved_profile is not None:
+                meta["profile"] = resolved_profile
+            if project is not None:
+                meta["project"] = project
             meta["config_path"] = str(container.config_path)
-        if project is not None:
-            meta["project"] = project
-        if projects is not None:
-            meta["projects"] = projects
-        if types is not None:
-            meta["types"] = types
-        if explain:
-            meta["explain"] = explain
+            if projects is not None:
+                meta["projects"] = projects
+            if types is not None:
+                meta["types"] = types
+            if explain:
+                meta["explain"] = explain
         return {
             "ok": True,
             "command": command,

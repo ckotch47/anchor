@@ -40,7 +40,6 @@ class HistoryCliTest(unittest.TestCase):
         self.assertEqual(search_payload["command"], "history.search")
         self.assertEqual(search_payload["data"]["count"], 1)
         self.assertEqual(search_payload["data"]["results"][0]["history"]["id"], history_id)
-        self.assertEqual(search_payload["meta"]["project"], "repo-a")
         self.assertIn("payload", search_payload["data"]["results"][0]["history"])
 
     def test_history_update_and_delete_emit_json(self) -> None:
@@ -69,8 +68,8 @@ class HistoryCliTest(unittest.TestCase):
         self.assertTrue(update_payload["ok"])
         self.assertEqual(update_payload["command"], "history.update")
         self.assertEqual(update_payload["data"]["history"]["payload"], "Deploy step updated")
-        self.assertEqual(update_payload["meta"]["project"], "repo-a")
+        self.assertNotIn("project", update_payload["meta"])
         self.assertTrue(delete_payload["ok"])
         self.assertEqual(delete_payload["command"], "history.delete")
         self.assertEqual(delete_payload["data"]["history"]["id"], history_id)
-        self.assertEqual(delete_payload["meta"]["project"], "repo-a")
+        self.assertNotIn("project", delete_payload["meta"])

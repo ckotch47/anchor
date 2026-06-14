@@ -54,3 +54,6 @@ class SearchCliTest(unittest.TestCase):
         self.assertEqual(payload["data"]["count"], 2)
         self.assertNotIn("attributes", payload["data"]["results"][0])
         self.assertNotIn("config_path", payload["meta"])
+        self.assertNotIn("projects", payload["meta"])
+        self.assertNotIn("types", payload["meta"])
+        self.assertNotIn("profile", payload["meta"])

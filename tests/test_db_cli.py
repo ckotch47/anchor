@@ -27,6 +27,7 @@ class DbCliTest(unittest.TestCase):
         self.assertEqual(payload["data"]["database_path"], str(db_path))
         self.assertEqual(payload["data"]["current_version"], 6)
         self.assertIn("checkpoint", payload["data"])
+        self.assertNotIn("profile", payload["meta"])
 
     def test_db_compact_emits_json(self) -> None:
         with patch("anchor.cli.build_container") as build_container_mock:
@@ -52,6 +53,7 @@ class DbCliTest(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["command"], "db.compact")
         self.assertEqual(payload["data"]["purged_documents"], 3)
+        self.assertNotIn("profile", payload["meta"])
         maintenance_service.compact.assert_called_once()
 
     def test_db_migrate_failure_emits_machine_error(self) -> None:

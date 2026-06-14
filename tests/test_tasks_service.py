@@ -195,6 +195,18 @@ class TasksServiceTest(unittest.TestCase):
         self.assertEqual(done.status, "done")
         self.assertIsNotNone(repo.completed)
 
+    def test_get_returns_full_record_and_raises_when_missing(self) -> None:
+        repo = FakeTasksRepository()
+        service = TasksService(repository=repo, project="workspace")
+
+        created = service.add(title="Ship tasks", body="Implement task slice", project="repo-a")
+        fetched = service.get(created.id, project="repo-a")
+
+        self.assertEqual(fetched.id, created.id)
+        self.assertEqual(fetched.title, "Ship tasks")
+        with self.assertRaises(LookupError):
+            service.get(TASK_OTHER_ID, project="repo-a")
+
     def test_list_supports_cursor_pagination(self) -> None:
         class PaginatedRepository(FakeTasksRepository):
             def list(

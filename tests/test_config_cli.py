@@ -25,6 +25,8 @@ class ConfigCliTest(unittest.TestCase):
         self.assertEqual(payload["command"], "config.get")
         self.assertEqual(payload["data"]["config_path"], str(config_path))
         self.assertEqual(payload["data"]["config"]["runtime"]["default_project"], "workspace")
+        self.assertEqual(payload["meta"]["view"], "compact")
+        self.assertNotIn("profile", payload["meta"])
 
     def test_config_set_updates_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -38,6 +40,7 @@ class ConfigCliTest(unittest.TestCase):
 
         payload = json.loads(echo_mock.call_args.args[0])
         self.assertEqual(payload["data"]["config"]["runtime"]["default_view"], "full")
+        self.assertNotIn("profile", payload["meta"])
 
     def test_config_set_parses_false_as_false(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -77,6 +80,8 @@ class ConfigCliTest(unittest.TestCase):
                     self.assertTrue(payload["ok"])
                     self.assertEqual(payload["command"], "config.init")
                     self.assertTrue(config_path.exists())
+                    self.assertEqual(payload["meta"]["view"], "compact")
+                    self.assertNotIn("profile", payload["meta"])
 
     def test_config_init_rejects_existing_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

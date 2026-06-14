@@ -25,6 +25,7 @@ class HealthCliTest(unittest.TestCase):
         self.assertEqual(payload["command"], "health")
         self.assertEqual(payload["data"]["status"], "ok")
         self.assertEqual(payload["meta"]["view"], "compact")
+        self.assertNotIn("profile", payload["meta"])
 
     def test_health_migration_failure_emits_machine_error(self) -> None:
         with patch("anchor.cli.build_container", side_effect=RuntimeError("boom")):

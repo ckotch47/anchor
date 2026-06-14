@@ -114,6 +114,39 @@ def tasks_update(
         response_formatter.emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
 
 
+@tasks_app.command(name="get")
+def tasks_get(
+    task_id: Annotated[str, typer.Option("--id")],
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    view: Annotated[str | None, typer.Option("--view")] = None,
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+) -> None:
+    try:
+        container = build_container(profile=profile)
+        resolved_project = resolve_project(container, project)
+        resolved_view = resolve_view(container, view)
+        result = container.tasks_service.get(task_id, project=resolved_project)
+        typer.echo(
+            json.dumps(
+                response_formatter.format_success(
+                    "tasks.get",
+                    {"task": result.model_dump()},
+                    container,
+                    view=resolved_view,
+                    extra_meta={"project": resolved_project},
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    except LookupError as exc:
+        response_formatter.emit_error("tasks", "NOT_FOUND", str(exc))
+    except ValueError as exc:
+        response_formatter.emit_error("tasks", "INVALID_ARGS", str(exc))
+    except Exception as exc:
+        response_formatter.emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
+
+
 @tasks_app.command(name="list")
 def tasks_list(
     limit: Annotated[int, typer.Option("--limit")] = 20,

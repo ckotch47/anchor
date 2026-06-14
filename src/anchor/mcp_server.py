@@ -28,13 +28,16 @@ def _tool_result(
     extra_meta: dict[str, Any] | None = None,
     is_error: bool = False,
 ) -> CallToolResult:
+    resolved_view = resolve_view(container, view)
     payload = response_formatter.format_success(
         command,
         data,
         container,
-        view=view,
-        extra_meta={"project": project or container.config.runtime.default_project, **(extra_meta or {})},
+        view=resolved_view,
+        extra_meta={"project": project or container.config.runtime.default_project},
     )
+    if resolved_view == "full" and extra_meta:
+        payload["meta"].update(extra_meta)
     return CallToolResult(content=[], structuredContent=payload, isError=is_error)
 
 
@@ -107,7 +110,6 @@ def db_migrate(profile: str | None = None) -> dict[str, Any]:
             },
             "meta": {
                 "view": container.config.runtime.default_view,
-                "profile": container.profile_name,
             },
         },
     )
@@ -143,7 +145,6 @@ def db_compact(
             "data": result.model_dump(),
             "meta": {
                 "view": container.config.runtime.default_view,
-                "profile": container.profile_name,
             },
         },
     )
@@ -225,7 +226,7 @@ def notes_list(
         },
         container,
         project=resolved_project,
-        extra_meta={"view": resolved_view},
+        view=resolved_view,
     )
 
 
@@ -272,7 +273,6 @@ def notes_search(
         container,
         project=resolved_project,
         view=resolved_view,
-        extra_meta={"view": resolved_view},
     )
 
 
@@ -356,7 +356,6 @@ def history_search(
         container,
         project=resolved_project,
         view=resolved_view,
-        extra_meta={"view": resolved_view},
     )
 
 
@@ -436,6 +435,25 @@ def tasks_update(
     return _tool_result("tasks.update", {"task": result.model_dump()}, container, project=resolved_project)
 
 
+@mcp_app.tool(name="tasks_get", description="Get one task by id")
+def tasks_get(
+    task_id: str,
+    project: str | None = None,
+    view: str | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    resolved_project = resolve_project(container, project)
+    result = container.tasks_service.get(task_id, project=resolved_project)
+    return _tool_result(
+        "tasks.get",
+        {"task": result.model_dump()},
+        container,
+        project=resolved_project,
+        view=view,
+    )
+
+
 @mcp_app.tool(name="tasks_list", description="List tasks in the current project")
 def tasks_list(
     limit: int = 20,
@@ -460,7 +478,7 @@ def tasks_list(
         },
         container,
         project=resolved_project,
-        extra_meta={"view": resolved_view},
+        view=resolved_view,
     )
 
 
@@ -491,7 +509,6 @@ def tasks_search(
         container,
         project=resolved_project,
         view=resolved_view,
-        extra_meta={"view": resolved_view},
     )
 
 
@@ -554,12 +571,7 @@ def files_get(
     except ValueError as exc:
         return _failure("files.get", "INVALID_ARGS", str(exc), container)
     return _tool_result(
-        "files.get",
-        {"file": result.file.model_dump()},
-        container,
-        project=resolved_project,
-        view=resolved_view,
-        extra_meta={"view": resolved_view},
+        "files.get", {"file": result.file.model_dump()}, container, project=resolved_project, view=resolved_view
     )
 
 
@@ -627,7 +639,6 @@ def files_list(
         container,
         project=resolved_project,
         view=resolved_view,
-        extra_meta={"view": resolved_view},
     )
 
 
@@ -672,7 +683,6 @@ def files_search(
         container,
         project=resolved_project,
         view=resolved_view,
-        extra_meta={"view": resolved_view, "explain": explain},
     )
 
 
@@ -721,13 +731,6 @@ def search(
             )["data"],
             container,
             view=view,
-            extra_meta={
-                "project": resolved_project,
-                "projects": search_query.projects or [resolved_project],
-                "types": search_query.types,
-                "explain": explain,
-                "view": view or container.config.runtime.default_view,
-            },
         )
     except ValueError as exc:
         return _failure("search", "INVALID_ARGS", str(exc), container)

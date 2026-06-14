@@ -107,7 +107,6 @@ class NotesCliTest(unittest.TestCase):
         search_payload = json.loads(search_echo_mock.call_args.args[0])
         self.assertEqual(add_payload["data"]["note"]["project"], "repo-a")
         self.assertEqual(add_payload["data"]["note"]["metatags"], {"topic": "rag", "priority": 1})
-        self.assertEqual(list_payload["meta"]["project"], "repo-a")
         self.assertEqual(list_payload["data"]["notes"][0]["project"], "repo-a")
         self.assertEqual(get_payload["data"]["note"]["project"], "repo-a")
         self.assertEqual(search_payload["meta"]["project"], "repo-a")
@@ -150,6 +149,7 @@ class NotesCliTest(unittest.TestCase):
         self.assertEqual(payload["data"]["results"][0]["note"]["title"], "First note")
         self.assertIn("FTS", payload["data"]["results"][0]["snippet"])
         self.assertNotIn("config_path", payload["meta"])
+        self.assertNotIn("project", payload["meta"])
 
     def test_notes_search_rejects_empty_query(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -196,4 +196,4 @@ class NotesCliTest(unittest.TestCase):
         self.assertTrue(delete_payload["ok"])
         self.assertEqual(delete_payload["command"], "notes.delete")
         self.assertEqual(delete_payload["data"]["note"]["id"], note_id)
-        self.assertEqual(delete_payload["meta"]["project"], "repo-a")
+        self.assertNotIn("project", delete_payload["meta"])
