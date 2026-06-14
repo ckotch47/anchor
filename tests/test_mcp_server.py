@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from anchor.mcp_server import (
     files_index,
+    files_list,
     files_search,
     history_append,
     history_search,
@@ -38,6 +39,7 @@ class McpServerTest(unittest.TestCase):
         self.assertIn("history_delete", tool_names)
         self.assertIn("tasks_add", tool_names)
         self.assertIn("files_index", tool_names)
+        self.assertIn("files_list", tool_names)
         self.assertIn("files_search", tool_names)
 
     def test_mcp_view_full_returns_full_records(self) -> None:
@@ -60,6 +62,7 @@ class McpServerTest(unittest.TestCase):
                     tasks_list_payload = tasks_list(project="repo-a", view="full")
                     tasks_search_payload = tasks_search(query="Task", project="repo-a", view="full")
                     history_search_payload = history_search(query="Deploy", project="repo-a", view="full")
+                    files_list_payload = files_list(project="repo-a", view="full")
                     files_search_payload = files_search(query="greet", project="repo-a", view="full")
 
         self.assertIn("body", notes_list_payload["data"]["notes"][0])
@@ -67,12 +70,14 @@ class McpServerTest(unittest.TestCase):
         self.assertIn("body", tasks_list_payload["data"]["tasks"][0])
         self.assertIn("body", tasks_search_payload["data"]["results"][0]["task"])
         self.assertIn("payload", history_search_payload["data"]["results"][0]["history"])
+        self.assertIn("content_hash", files_list_payload["data"]["files"][0])
         self.assertIn("content_hash", files_search_payload["data"]["results"][0]["file"])
         self.assertEqual(notes_list_payload["meta"]["view"], "full")
         self.assertEqual(notes_search_payload["meta"]["view"], "full")
         self.assertEqual(tasks_list_payload["meta"]["view"], "full")
         self.assertEqual(tasks_search_payload["meta"]["view"], "full")
         self.assertEqual(history_search_payload["meta"]["view"], "full")
+        self.assertEqual(files_list_payload["meta"]["view"], "full")
         self.assertEqual(files_search_payload["meta"]["view"], "full")
 
     def test_mcp_invalid_view_returns_machine_error(self) -> None:

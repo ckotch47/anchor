@@ -31,6 +31,7 @@ ignore = ["E501"]
 
 [project.scripts]
 anchor = "anchor.main:main"
+anchor-mcp = "anchor.mcp_server:run_stdio"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

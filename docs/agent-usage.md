@@ -22,6 +22,7 @@
 - команды должны работать без интерактивных подтверждений.
 - приоритет у коротких ответов и компактных полей.
 - later MCP over stdio can reuse the same use-cases as a thin transport layer for agent integrations.
+- `anchor-mcp` is the direct stdio entrypoint for MCP-capable agents.
 
 ## Что агенту не следует делать
 

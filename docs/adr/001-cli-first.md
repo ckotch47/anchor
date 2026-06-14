@@ -14,4 +14,4 @@
   - Каждая команда должна иметь стабильный args contract, JSON output и понятные exit codes.
   - Человеческий TTY-режим является надстройкой, а не основным режимом.
   - Позднее можно добавить серверный слой поверх того же core, но не наоборот.
-  - Позднее можно добавить MCP over stdio как вторичный transport поверх тех же use-cases, не меняя core contract CLI.
+  - MCP over stdio уже допускается как вторичный transport поверх тех же use-cases, не меняя core contract CLI.

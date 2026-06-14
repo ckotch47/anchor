@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 
-from anchor.application.files.models import FilesIndexResult, FilesSearchResult
+from anchor.application.files.models import FilesIndexResult, FilesListResult, FilesSearchResult
 from anchor.cli_shared import build_success_payload, emit_error, resolve_project, resolve_view
 from anchor.container import build_container
 
@@ -28,6 +28,40 @@ def files_index(
                     "files.index",
                     result.model_dump(),
                     container,
+                    extra_meta={"project": resolved_project},
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    except ValueError as exc:
+        emit_error("files", "INVALID_ARGS", str(exc))
+    except Exception as exc:
+        emit_error("files", "DB_MIGRATION_FAILED", str(exc))
+
+
+@files_app.command(name="list")
+def files_list(
+    limit: Annotated[int, typer.Option("--limit")] = 20,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    view: Annotated[str | None, typer.Option("--view")] = None,
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+) -> None:
+    try:
+        container = build_container(profile=profile)
+        resolved_project = resolve_project(container, project)
+        result: FilesListResult = container.files_service.list(
+            limit=limit,
+            project=resolved_project,
+            view=resolve_view(container, view),
+        )
+        typer.echo(
+            json.dumps(
+                build_success_payload(
+                    "files.list",
+                    {"count": result.count, "files": [file.model_dump() for file in result.files]},
+                    container,
+                    view=view,
                     extra_meta={"project": resolved_project},
                 ),
                 ensure_ascii=False,

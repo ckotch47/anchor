@@ -67,6 +67,11 @@ class FilesIndexResult(BaseModel):
     deleted: int
 
 
+class FilesListResult(BaseModel):
+    count: int
+    files: list[IndexedFileRecord | FileListItem]
+
+
 class FilesSearchResult(BaseModel):
     query: str
     count: int

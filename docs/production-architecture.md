@@ -19,7 +19,7 @@ Anchor is a modular monolith.
 - `application/<domain>` owns domain use-cases
 - adapters own external systems and SQLite access
 - CLI is the primary transport
-- MCP over `stdio` can be added later as another thin transport
+- MCP over `stdio` is available as another thin transport via `anchor mcp` or `anchor-mcp`
 
 ## Bounded contexts
 
@@ -140,5 +140,5 @@ Fallback rules:
 ## Evolution path
 
 - CLI remains stable
-- MCP over `stdio` can be added later without changing the core use-cases
+- MCP over `stdio` stays a thin transport and does not change the core use-cases
 - future sync or replication layers must preserve the SQLite source of truth

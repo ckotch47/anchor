@@ -320,6 +320,7 @@ anchor search --query "deploy" --types notes,tasks,files --limit 5 --project rep
 - Exposes typed tools for health, config, notes, tasks, files, and cross-entity search.
 - Uses the same SQLite container and service layer as the CLI.
 - Mirrors the CLI `--view compact|full` contract on list and search tools so MCP agents can choose token-light or expanded payloads without a transport-specific shape.
+- The same transport is also available as the `anchor-mcp` console script for direct stdio execution.
 
 Example:
 
@@ -338,6 +339,18 @@ Example:
 
 ```bash
 anchor files index --root ./repo --project repo-a
+```
+
+### `anchor files list`
+
+- Returns indexed files for the selected project.
+- Emits a compact navigation record by default; `--view full` expands each row to the full indexed file record.
+- Use `--limit` to keep the response small when the repository is large.
+
+Example:
+
+```bash
+anchor files list --limit 10 --project repo-a
 ```
 
 ### `anchor files search`
@@ -423,6 +436,7 @@ anchor tasks delete --id <task-id> --project repo-a
 - `anchor tasks list`
 - `anchor tasks done`
 - `anchor files index`
+- `anchor files list`
 - `anchor files search`
 - `anchor mcp`
 - `anchor history append`

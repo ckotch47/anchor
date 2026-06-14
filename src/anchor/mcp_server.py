@@ -4,6 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from anchor.application.files.models import FilesListResult
 from anchor.application.history.models import HistorySearchResult
 from anchor.application.retrieval.search_query import SearchQuery
 from anchor.cli_shared import build_success_payload, config_payload, resolve_project, resolve_view
@@ -442,6 +443,29 @@ def files_index(
     resolved_project = resolve_project(container, project)
     result = container.files_service.index(roots=roots, project=resolved_project)
     return _success("files.index", result.model_dump(), container, project=resolved_project)
+
+
+@mcp_app.tool(name="files_list", description="List indexed files in the current project")
+def files_list(
+    limit: int = 20,
+    project: str | None = None,
+    view: str | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    resolved_project = resolve_project(container, project)
+    try:
+        resolved_view = resolve_view(container, view)
+    except ValueError as exc:
+        return _error("files.list", "INVALID_ARGS", str(exc))
+    result: FilesListResult = container.files_service.list(limit=limit, project=resolved_project, view=resolved_view)
+    return _success(
+        "files.list",
+        {"count": result.count, "files": [file.model_dump() for file in result.files]},
+        container,
+        project=resolved_project,
+        extra_meta={"view": resolved_view},
+    )
 
 
 @mcp_app.tool(name="files_search", description="Search indexed files")

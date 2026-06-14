@@ -19,6 +19,32 @@ FILE_EMBEDDING_CHUNK_ID = uuid7_str()
 
 
 class FilesServiceTest(unittest.TestCase):
+    def test_list_returns_compact_file_items(self) -> None:
+        class FakeRepository:
+            def list_indexed_files(self, *, project: str):
+                del project
+                return [
+                    FileListItem(
+                        id=FILE_ID,
+                        path="/repo/app.py",
+                        root_path="/repo",
+                        language="python",
+                        file_size=42,
+                    )
+                ]
+
+        service = FilesService(
+            repository=FakeRepository(),
+            chunking_service=FileChunkingService(),
+            project="repo-a",
+        )
+
+        result = service.list(project="repo-a")
+
+        self.assertEqual(result.count, 1)
+        self.assertEqual(result.files[0].id, FILE_ID)
+        self.assertEqual(result.files[0].path, "/repo/app.py")
+
     def test_search_uses_vector_and_rerank(self) -> None:
         class FakeRepository:
             def search_lexical_candidates(self, query: str, limit: int, *, project: str):

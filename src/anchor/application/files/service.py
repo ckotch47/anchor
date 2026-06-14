@@ -10,7 +10,14 @@ from anchor.adapters.sqlite_files_repository import SqliteFilesRepository
 from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.files.chunking import FileChunkingService
-from anchor.application.files.models import FileSearchCandidate, FileSearchHit, FilesIndexResult, FilesSearchResult
+from anchor.application.files.models import (
+    FileSearchCandidate,
+    FileSearchHit,
+    FilesIndexResult,
+    FilesListResult,
+    FilesSearchResult,
+)
+from anchor.application.retrieval.compact_items import compact_file_item
 from anchor.application.retrieval.document_chunking import count_tokens
 from anchor.application.retrieval.rerank_service import RerankService
 from anchor.application.retrieval.search_scoring import combine_search_scores
@@ -142,6 +149,16 @@ class FilesService:
                 self._repository.delete(record.id, project=resolved_project)
                 deleted += 1
         return FilesIndexResult(count=indexed + deleted, indexed=indexed, skipped=skipped, deleted=deleted)
+
+    def list(self, limit: int = 20, *, project: str | None = None, view: str = "compact") -> FilesListResult:
+        if limit <= 0:
+            raise ValueError("limit must be greater than zero")
+        resolved_project = project or self._project
+        files = self._repository.list_indexed_files(project=resolved_project)[:limit]
+        return FilesListResult(
+            count=len(files),
+            files=files if view == "full" else [compact_file_item(file) for file in files],
+        )
 
     def search(
         self,
