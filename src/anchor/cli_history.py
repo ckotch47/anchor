@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from anchor.application.history.models import HistorySearchResult
-from anchor.cli_shared import build_success_payload, emit_error, parse_metatags, resolve_project, resolve_view
+from anchor.cli_shared import parse_metatags, resolve_project, resolve_view, response_formatter
 from anchor.container import build_container
 
 history_app = typer.Typer(add_completion=False, help="History commands")
@@ -35,7 +35,7 @@ def history_append(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "history.append",
                     {"history": result.model_dump()},
                     container,
@@ -46,9 +46,9 @@ def history_append(
             )
         )
     except ValueError as exc:
-        emit_error("history", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("history", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("history", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("history", "DB_MIGRATION_FAILED", str(exc))
 
 
 @history_app.command(name="update")
@@ -76,7 +76,7 @@ def history_update(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "history.update",
                     {"history": result.model_dump()},
                     container,
@@ -87,11 +87,11 @@ def history_update(
             )
         )
     except ValueError as exc:
-        emit_error("history", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("history", "INVALID_ARGS", str(exc))
     except LookupError as exc:
-        emit_error("history", "NOT_FOUND", str(exc))
+        response_formatter.emit_error("history", "NOT_FOUND", str(exc))
     except Exception as exc:
-        emit_error("history", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("history", "DB_MIGRATION_FAILED", str(exc))
 
 
 @history_app.command(name="search")
@@ -113,25 +113,21 @@ def history_search(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_search(
                     "history.search",
-                    {
-                        "query": result.query,
-                        "count": result.count,
-                        "results": [hit.model_dump() for hit in result.results],
-                    },
+                    result,
                     container,
                     view=view,
-                    extra_meta={"project": resolved_project},
+                    project=resolved_project,
                 ),
                 ensure_ascii=False,
                 indent=2,
             )
         )
     except ValueError as exc:
-        emit_error("history", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("history", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("history", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("history", "DB_MIGRATION_FAILED", str(exc))
 
 
 @history_app.command(name="delete")
@@ -146,7 +142,7 @@ def history_delete(
         result = container.history_service.delete(history_id, project=resolved_project)
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "history.delete",
                     {"history": result.model_dump()},
                     container,
@@ -157,6 +153,6 @@ def history_delete(
             )
         )
     except LookupError as exc:
-        emit_error("history", "NOT_FOUND", str(exc))
+        response_formatter.emit_error("history", "NOT_FOUND", str(exc))
     except Exception as exc:
-        emit_error("history", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("history", "DB_MIGRATION_FAILED", str(exc))

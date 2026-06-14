@@ -14,10 +14,7 @@ class RerankService:
             return []
         query_embedding = self._embedding_service.embed_texts([query]).embeddings[0].embedding
         candidate_embeddings = self._embedding_service.embed_texts(texts).embeddings
-        return [
-            self._cosine_similarity(query_embedding, candidate.embedding)
-            for candidate in candidate_embeddings
-        ]
+        return [self._cosine_similarity(query_embedding, candidate.embedding) for candidate in candidate_embeddings]
 
     @staticmethod
     def _cosine_similarity(left: list[float], right: list[float]) -> float:

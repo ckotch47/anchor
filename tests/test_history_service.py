@@ -209,7 +209,9 @@ class HistoryServiceTest(unittest.TestCase):
             chunking_service=DocumentChunkingService(),
             project="workspace",
             embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="test-embed"),
-            rerank_service=RerankService(embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="test-rerank")),
+            rerank_service=RerankService(
+                embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="test-rerank")
+            ),
             budget_tokens=100,
         )
 

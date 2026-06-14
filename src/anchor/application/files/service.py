@@ -307,7 +307,9 @@ class FilesService:
         )
         results = [
             FileSearchHit(
-                file=self._repository.get(candidate.file.id, project=resolved_project) if view == "full" else candidate.file,
+                file=self._repository.get(candidate.file.id, project=resolved_project)
+                if view == "full"
+                else candidate.file,
                 chunk_id=candidate.chunk_id,
                 score=combine_search_scores(
                     lexical_score=candidate.lexical_score,
@@ -648,9 +650,7 @@ class FilesService:
     def _estimate_result_tokens(result: FileSearchHit) -> int:
         return max(
             1,
-            count_tokens(result.file.path)
-            + count_tokens(result.file.root_path)
-            + count_tokens(result.snippet),
+            count_tokens(result.file.path) + count_tokens(result.file.root_path) + count_tokens(result.snippet),
         )
 
     @staticmethod

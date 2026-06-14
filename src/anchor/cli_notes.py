@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from anchor.application.notes.models import NotesListResult
-from anchor.cli_shared import build_success_payload, emit_error, parse_metatags, resolve_project, resolve_view
+from anchor.cli_shared import parse_metatags, resolve_project, resolve_view, response_formatter
 from anchor.container import build_container
 
 notes_app = typer.Typer(add_completion=False, help="Notes commands")
@@ -37,7 +37,7 @@ def notes_add(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "notes.add",
                     {"note": result.model_dump()},
                     container,
@@ -48,9 +48,9 @@ def notes_add(
             )
         )
     except ValueError as exc:
-        emit_error("notes", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("notes", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
 
 
 @notes_app.command(name="update")
@@ -80,7 +80,7 @@ def notes_update(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "notes.update",
                     {"note": result.model_dump()},
                     container,
@@ -91,11 +91,11 @@ def notes_update(
             )
         )
     except LookupError as exc:
-        emit_error("notes", "NOT_FOUND", str(exc))
+        response_formatter.emit_error("notes", "NOT_FOUND", str(exc))
     except ValueError as exc:
-        emit_error("notes", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("notes", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
 
 
 @notes_app.command(name="list")
@@ -117,7 +117,7 @@ def notes_list(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "notes.list",
                     {
                         "count": result.count,
@@ -133,9 +133,9 @@ def notes_list(
             )
         )
     except ValueError as exc:
-        emit_error("notes", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("notes", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
 
 
 @notes_app.command(name="get")
@@ -150,7 +150,7 @@ def notes_get(
         result = container.notes_service.get(note_id, project=resolved_project)
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "notes.get",
                     {"note": result.model_dump()},
                     container,
@@ -161,11 +161,11 @@ def notes_get(
             )
         )
     except LookupError as exc:
-        emit_error("notes", "NOT_FOUND", str(exc))
+        response_formatter.emit_error("notes", "NOT_FOUND", str(exc))
     except ValueError as exc:
-        emit_error("notes", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("notes", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
 
 
 @notes_app.command(name="search")
@@ -187,25 +187,21 @@ def notes_search(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_search(
                     "notes.search",
-                    {
-                        "query": result.query,
-                        "count": result.count,
-                        "results": [hit.model_dump() for hit in result.results],
-                    },
+                    result,
                     container,
                     view=view,
-                    extra_meta={"project": resolved_project},
+                    project=resolved_project,
                 ),
                 ensure_ascii=False,
                 indent=2,
             )
         )
     except ValueError as exc:
-        emit_error("notes", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("notes", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
 
 
 @notes_app.command(name="delete")
@@ -220,7 +216,7 @@ def notes_delete(
         result = container.notes_service.delete(note_id, project=resolved_project)
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "notes.delete",
                     {"note": result.model_dump()},
                     container,
@@ -231,8 +227,8 @@ def notes_delete(
             )
         )
     except LookupError as exc:
-        emit_error("notes", "NOT_FOUND", str(exc))
+        response_formatter.emit_error("notes", "NOT_FOUND", str(exc))
     except ValueError as exc:
-        emit_error("notes", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("notes", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("notes", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("notes", "DB_MIGRATION_FAILED", str(exc))

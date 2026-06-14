@@ -406,7 +406,12 @@ class SqliteNotesRepository(SqliteRepositoryBase):
     def search(self, query: str, limit: int, *, project: str) -> list[NotesSearchHit]:
         candidates = self.search_lexical_candidates(query=query, limit=limit, project=project)
         return [
-            NotesSearchHit(note=candidate.note, chunk_id=candidate.chunk_id, score=candidate.lexical_score, snippet=candidate.snippet)
+            NotesSearchHit(
+                note=candidate.note,
+                chunk_id=candidate.chunk_id,
+                score=candidate.lexical_score,
+                snippet=candidate.snippet,
+            )
             for candidate in candidates
         ]
 
@@ -563,7 +568,6 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                 reverse=True,
             )
             return candidates[:limit]
-        
 
     def _row_to_record(self, row: sqlite3.Row) -> NoteRecord:
         return NoteRecord(

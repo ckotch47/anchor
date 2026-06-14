@@ -9,7 +9,7 @@ from anchor.cli_files import files_app, files_delete, files_get, files_index, fi
 from anchor.cli_history import history_app, history_append, history_delete, history_search, history_update
 from anchor.cli_notes import notes_add, notes_app, notes_delete, notes_get, notes_list, notes_search, notes_update
 from anchor.cli_search import search_command
-from anchor.cli_shared import config_payload, emit_error
+from anchor.cli_shared import response_formatter
 from anchor.cli_tasks import tasks_add, tasks_app, tasks_delete, tasks_done, tasks_list, tasks_search, tasks_update
 from anchor.container import build_container
 from anchor.mcp_server import run_stdio
@@ -69,12 +69,11 @@ def health(
             "meta": {
                 "view": container.config.runtime.default_view,
                 "profile": container.profile_name,
-                "config_path": str(container.config_path),
             },
         }
         typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
     except Exception as exc:
-        emit_error("health", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("health", "DB_MIGRATION_FAILED", str(exc))
 
 
 @app.command(name="config")
@@ -102,18 +101,20 @@ def config_command(
             case "init":
                 _handle_config_init(container, force=force)
             case _:
-                emit_error("config", "INVALID_ARGS", "config action must be 'get', 'set', or 'init'")
+                response_formatter.emit_error("config", "INVALID_ARGS", "config action must be 'get', 'set', or 'init'")
     except ValueError as exc:
-        emit_error("config", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("config", "INVALID_ARGS", str(exc))
     except FileExistsError as exc:
-        emit_error("config", "CONFIG_EXISTS", str(exc))
+        response_formatter.emit_error("config", "CONFIG_EXISTS", str(exc))
     except Exception as exc:
-        emit_error("config", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("config", "DB_MIGRATION_FAILED", str(exc))
 
 
 def _handle_config_get(container: Any, profile: str | None = None) -> None:
     result = container.config_service.get(profile=profile)
-    typer.echo(json.dumps(config_payload("config.get", result, container), ensure_ascii=False, indent=2))
+    typer.echo(
+        json.dumps(response_formatter.format_config("config.get", result, container), ensure_ascii=False, indent=2)
+    )
 
 
 def _handle_config_set(
@@ -124,14 +125,16 @@ def _handle_config_set(
     profile: str | None = None,
 ) -> None:
     if section is None or key is None or value is None:
-        emit_error("config", "INVALID_ARGS", "config set requires --section, --key, and --value")
+        response_formatter.emit_error("config", "INVALID_ARGS", "config set requires --section, --key, and --value")
     result = container.config_service.set(
         section=section,
         key=key,
         value=value,
         profile=profile,
     )
-    typer.echo(json.dumps(config_payload("config.set", result, container), ensure_ascii=False, indent=2))
+    typer.echo(
+        json.dumps(response_formatter.format_config("config.set", result, container), ensure_ascii=False, indent=2)
+    )
 
 
 def _handle_config_init(container: Any, force: bool = False) -> None:
@@ -161,7 +164,9 @@ def _handle_config_init(container: Any, force: bool = False) -> None:
 def db_command(
     action: Annotated[str, typer.Argument(..., help="migrate or compact")],
     retention_days: Annotated[int, typer.Option("--retention-days")] = 30,
-    rebuild_search_indexes: Annotated[bool, typer.Option("--rebuild-search-indexes/--no-rebuild-search-indexes")] = True,
+    rebuild_search_indexes: Annotated[
+        bool, typer.Option("--rebuild-search-indexes/--no-rebuild-search-indexes")
+    ] = True,
     vacuum: Annotated[bool, typer.Option("--vacuum/--no-vacuum")] = True,
     checkpoint: Annotated[bool, typer.Option("--checkpoint/--no-checkpoint")] = True,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
@@ -180,13 +185,13 @@ def db_command(
                     checkpoint=checkpoint,
                 )
             case _:
-                emit_error("db", "INVALID_ARGS", "db action must be 'migrate' or 'compact'")
+                response_formatter.emit_error("db", "INVALID_ARGS", "db action must be 'migrate' or 'compact'")
     except typer.Exit:
         raise
     except ValueError as exc:
-        emit_error("db", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("db", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("db", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("db", "DB_MIGRATION_FAILED", str(exc))
 
 
 @app.command(name="mcp")

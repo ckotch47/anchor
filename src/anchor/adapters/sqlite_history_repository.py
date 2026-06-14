@@ -464,7 +464,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
             embedding = self._deserialize_embedding(row["embedding"])
             vector_score = cosine_similarity(query_embedding, embedding)
             candidates.append(
-            HistorySearchCandidate(
+                HistorySearchCandidate(
                     history=self._row_to_search_item(row),
                     chunk_id=str(row["chunk_id"]),
                     snippet=self._build_snippet(str(row["chunk_text"])),

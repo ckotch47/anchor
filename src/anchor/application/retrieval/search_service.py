@@ -200,7 +200,12 @@ class SearchService:
         return trimmed
 
     def _estimate_hit_tokens(self, hit: SearchHit) -> int:
-        return max(1, count_tokens(hit.title) + count_tokens(hit.snippet) + count_tokens(json.dumps(hit.attributes, ensure_ascii=False, separators=(",", ":"))))
+        return max(
+            1,
+            count_tokens(hit.title)
+            + count_tokens(hit.snippet)
+            + count_tokens(json.dumps(hit.attributes, ensure_ascii=False, separators=(",", ":"))),
+        )
 
     def _estimate_consumed_tokens(self, hits: list[SearchHit]) -> int:
         return sum(self._estimate_hit_tokens(hit) for hit in hits)

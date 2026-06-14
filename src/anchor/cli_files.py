@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from anchor.application.files.models import FilesIndexResult, FilesListResult, FilesSearchResult
-from anchor.cli_shared import build_success_payload, emit_error, resolve_project, resolve_view
+from anchor.cli_shared import resolve_project, resolve_view, response_formatter
 from anchor.container import build_container
 
 files_app = typer.Typer(add_completion=False, help="Filesystem commands")
@@ -24,7 +24,7 @@ def files_index(
         result: FilesIndexResult = container.files_service.index(roots=root, project=resolved_project)
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "files.index",
                     result.model_dump(),
                     container,
@@ -35,9 +35,9 @@ def files_index(
             )
         )
     except ValueError as exc:
-        emit_error("files", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("files", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("files", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("files", "DB_MIGRATION_FAILED", str(exc))
 
 
 @files_app.command(name="get")
@@ -64,7 +64,7 @@ def files_get(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "files.get",
                     {"file": result.file.model_dump()},
                     container,
@@ -76,11 +76,11 @@ def files_get(
             )
         )
     except LookupError as exc:
-        emit_error("files", "NOT_FOUND", str(exc))
+        response_formatter.emit_error("files", "NOT_FOUND", str(exc))
     except ValueError as exc:
-        emit_error("files", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("files", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("files", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("files", "DB_MIGRATION_FAILED", str(exc))
 
 
 @files_app.command(name="delete")
@@ -106,7 +106,7 @@ def files_delete(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "files.delete",
                     {"file": result.file.model_dump()},
                     container,
@@ -117,11 +117,11 @@ def files_delete(
             )
         )
     except LookupError as exc:
-        emit_error("files", "NOT_FOUND", str(exc))
+        response_formatter.emit_error("files", "NOT_FOUND", str(exc))
     except ValueError as exc:
-        emit_error("files", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("files", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("files", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("files", "DB_MIGRATION_FAILED", str(exc))
 
 
 @files_app.command(name="list")
@@ -149,7 +149,7 @@ def files_list(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "files.list",
                     {
                         "count": result.count,
@@ -165,9 +165,9 @@ def files_list(
             )
         )
     except ValueError as exc:
-        emit_error("files", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("files", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("files", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("files", "DB_MIGRATION_FAILED", str(exc))
 
 
 @files_app.command(name="search")
@@ -197,23 +197,19 @@ def files_search(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_search(
                     "files.search",
-                    {
-                        "query": result.query,
-                        "count": result.count,
-                        "results": [hit.model_dump() for hit in result.results],
-                        **({"stats": result.stats} if result.stats is not None else {}),
-                    },
+                    result,
                     container,
                     view=view,
-                    extra_meta={"project": resolved_project, "explain": explain},
+                    project=resolved_project,
+                    explain=explain,
                 ),
                 ensure_ascii=False,
                 indent=2,
             )
         )
     except ValueError as exc:
-        emit_error("files", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("files", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("files", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("files", "DB_MIGRATION_FAILED", str(exc))

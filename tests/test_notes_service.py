@@ -337,7 +337,9 @@ class NotesServiceTest(unittest.TestCase):
                     return [second_note]
                 return []
 
-        service = NotesService(repository=PaginatedRepository(), chunking_service=DocumentChunkingService(), project="workspace")
+        service = NotesService(
+            repository=PaginatedRepository(), chunking_service=DocumentChunkingService(), project="workspace"
+        )
 
         first_page = service.list(project="repo-a", limit=1)
         second_page = service.list(project="repo-a", limit=1, cursor=first_page.next_cursor)

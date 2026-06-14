@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from anchor.application.retrieval.search_query import SearchQuery
-from anchor.cli_shared import build_success_payload, emit_error, resolve_project
+from anchor.cli_shared import resolve_project, response_formatter
 from anchor.container import build_container
 
 
@@ -20,40 +20,6 @@ def _parse_projects(raw_projects: str | None) -> list[str] | None:
     if raw_projects is None or not raw_projects.strip():
         return None
     return [project.strip() for project in raw_projects.split(",") if project.strip()]
-
-
-def _render_search_payload(
-    result: object,
-    container: object,
-    resolved_project: str,
-    resolved_projects: list[str] | None,
-    explain: bool,
-    search_types: list[str],
-    view: str | None,
-) -> None:
-    data = result.model_dump(exclude_none=True)
-    if not explain and isinstance(data, dict):
-        stats = data.get("stats")
-        if stats is None:
-            data.pop("stats", None)
-    typer.echo(
-        json.dumps(
-            build_success_payload(
-                "search",
-                data,
-                container,
-                view=view,
-                extra_meta={
-                    "project": resolved_project,
-                    "projects": resolved_projects or [resolved_project],
-                    "types": search_types,
-                    "explain": explain,
-                },
-            ),
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
 
 
 def search_command(
@@ -78,14 +44,31 @@ def search_command(
             project=resolved_project,
             projects=_parse_projects(projects),
             limit=limit,
-            budget_tokens=budget_tokens if budget_tokens is not None else container.config.runtime.default_budget_tokens,
+            budget_tokens=budget_tokens
+            if budget_tokens is not None
+            else container.config.runtime.default_budget_tokens,
             explain=explain,
             cursor=cursor,
         )
         result = container.search_service.search(search_query)
         resolved_projects = search_query.projects or [resolved_project]
-        _render_search_payload(result, container, resolved_project, resolved_projects, explain, search_types, view)
+        typer.echo(
+            json.dumps(
+                response_formatter.format_search(
+                    "search",
+                    result,
+                    container,
+                    view=view,
+                    project=resolved_project,
+                    projects=resolved_projects,
+                    types=search_types,
+                    explain=explain,
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     except ValueError as exc:
-        emit_error("search", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("search", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("search", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("search", "DB_MIGRATION_FAILED", str(exc))

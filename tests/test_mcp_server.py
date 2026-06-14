@@ -18,6 +18,7 @@ from anchor.mcp_server import (
     notes_add,
     notes_list,
     notes_search,
+    search,
     tasks_add,
     tasks_list,
     tasks_search,
@@ -149,6 +150,26 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(_structured(deleted_payload)["data"]["file"]["path"], str((root / "app.py").resolve()))
         self.assertEqual(_structured(list_payload)["data"]["count"], 0)
         self.assertEqual(_structured(search_payload)["data"]["count"], 0)
+        self.assertNotIn("query", _structured(search_payload)["data"])
+
+    def test_mcp_search_compact_omits_query_and_attributes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            db_path = Path(tmpdir) / "anchor.sqlite3"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=db_path):
+                    notes_add(title="Note", body="Body text", source="cli", project="repo-a")
+                    tasks_add(title="Task", body="Task body", project="repo-a")
+                    payload = search(query="Body", types=["notes", "tasks"], project="repo-a")
+
+        self.assertEqual(payload.content, [])
+        structured = _structured(payload)
+        self.assertTrue(structured["ok"])
+        self.assertEqual(structured["command"], "search")
+        self.assertNotIn("query", structured["data"])
+        self.assertEqual(structured["data"]["count"], 2)
+        self.assertNotIn("attributes", structured["data"]["results"][0])
+        self.assertNotIn("config_path", structured["meta"])
 
     def test_mcp_files_list_exposes_next_cursor(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

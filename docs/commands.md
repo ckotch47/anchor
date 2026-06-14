@@ -215,6 +215,7 @@ anchor notes get --id <note-id> --project repo-a
 - The search pipeline is lexical candidate generation, vector candidate generation, rerank, dedup by note, and budget trim.
 - The final response is capped by the configured token budget so agents get a compact result set.
 - `--view full` expands each hit to the full note record, while the default stays compact.
+- In compact view, the response omits the echoed `query` field and keeps only the minimal hit envelope.
 - If embeddings or rerank are unavailable, search degrades to lexical-only instead of failing.
 - Search text is normalized before `MATCH`, so special FTS characters are treated as query text, not syntax.
 - The target contract is project-scoped and can further filter by metatags before ranking.
@@ -306,6 +307,7 @@ anchor tasks add --title "Ship tasks slice" --body "Implement tasks commands" --
 - Search text is normalized before `MATCH`, so special FTS characters are treated as query text, not syntax.
 - The target contract is project-scoped and filtered to the task domain before ranking.
 - If a provider is unavailable, task search stays lexical-only.
+- In compact view, the response omits the echoed `query` field and keeps only the minimal hit envelope.
 
 Example:
 
@@ -320,6 +322,7 @@ anchor tasks search --query "deploy" --limit 5 --project repo-a
 - Cross-project search is opt-in through `--projects repo-a,repo-b`; the default remains a single selected project.
 - The request is modeled as a first-class search query with `query`, `types`, `project`, optional `projects`, `limit`, `budget_tokens`, optional `weights`, and an opaque `--cursor` token for score-based pagination.
 - The result envelope stays compact, can add explain-style retrieval stats with `--explain`, and returns `next_cursor` when another page is available.
+- In compact view, the response omits the echoed query object and per-hit attributes; `--view full` restores the full search envelope.
 - Current support covers `notes`, `tasks`, and `files`; `history` is reserved for the later slice.
 
 Example:
@@ -406,6 +409,7 @@ anchor files list --limit 10 --cursor <next-cursor> --project repo-a
 - `--root`, `--language`, and `--path-prefix` narrow the candidate pool before rerank and budget trim.
 - Relative `--path` and `--path-prefix` values resolve against `--root` when it is provided, otherwise against the current working directory.
 - `--explain` adds retrieval stats to the machine response so agents can see candidate and dedup counts.
+- In compact view, the response omits the echoed `query` field and any extra search metadata unless `--explain` is set.
 - `--view full` expands each hit to the full indexed file record.
 
 Example:

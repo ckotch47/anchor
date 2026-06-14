@@ -144,7 +144,9 @@ class HistoryService:
         )
         results = [
             HistorySearchHit(
-                history=self.get(candidate.history.id, project=resolved_project) if view == "full" else candidate.history,
+                history=self.get(candidate.history.id, project=resolved_project)
+                if view == "full"
+                else candidate.history,
                 chunk_id=candidate.chunk_id,
                 score=combine_search_scores(
                     lexical_score=candidate.lexical_score,
@@ -293,7 +295,9 @@ class HistoryService:
             return []
         return self._repository.search_vector_candidates(query_embedding=query_embedding, limit=limit, project=project)
 
-    def _trim_to_budget(self, results: list[HistorySearchCandidate], budget_tokens: int) -> list[HistorySearchCandidate]:
+    def _trim_to_budget(
+        self, results: list[HistorySearchCandidate], budget_tokens: int
+    ) -> list[HistorySearchCandidate]:
         if budget_tokens <= 0:
             return []
         trimmed: list[HistorySearchCandidate] = []
@@ -308,7 +312,10 @@ class HistoryService:
 
     @staticmethod
     def _estimate_result_tokens(result: HistorySearchCandidate) -> int:
-        return max(1, count_tokens(result.history.entry_type) + count_tokens(result.history.actor) + count_tokens(result.snippet))
+        return max(
+            1,
+            count_tokens(result.history.entry_type) + count_tokens(result.history.actor) + count_tokens(result.snippet),
+        )
 
     @staticmethod
     def _serialize_metatags(metatags: dict[str, object]) -> str:

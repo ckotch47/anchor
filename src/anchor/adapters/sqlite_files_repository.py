@@ -373,7 +373,9 @@ class SqliteFilesRepository(SqliteRepositoryBase):
         path_prefix: str | None = None,
     ) -> list[FileSearchCandidate]:
         match_query = normalize_fts5_query(query)
-        filters_sql, filter_params = self._file_filter_clauses(root_path=root_path, language=language, path_prefix=path_prefix)
+        filters_sql, filter_params = self._file_filter_clauses(
+            root_path=root_path, language=language, path_prefix=path_prefix
+        )
         with self._connect() as connection:
             rows = connection.execute(
                 """
@@ -439,7 +441,9 @@ class SqliteFilesRepository(SqliteRepositoryBase):
         language: str | None = None,
         path_prefix: str | None = None,
     ) -> list[FileSearchCandidate]:
-        filters_sql, filter_params = self._file_filter_clauses(root_path=root_path, language=language, path_prefix=path_prefix)
+        filters_sql, filter_params = self._file_filter_clauses(
+            root_path=root_path, language=language, path_prefix=path_prefix
+        )
         with self._connect() as connection:
             vector_extension_loaded = try_load_sqlite_vector_extension(connection)
             if vector_extension_loaded and ensure_vector_index(

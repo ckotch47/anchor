@@ -140,15 +140,16 @@ class NotesCliTest(unittest.TestCase):
                         notes_add(title="Second note", body="Something unrelated", source="cli")
 
                     with patch("typer.echo") as echo_mock:
-                        notes_search(query='FTS * (search)', limit=10)
+                        notes_search(query="FTS * (search)", limit=10)
 
         payload = json.loads(echo_mock.call_args.args[0])
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["command"], "notes.search")
-        self.assertEqual(payload["data"]["query"], "FTS * (search)")
+        self.assertNotIn("query", payload["data"])
         self.assertEqual(payload["data"]["count"], 1)
         self.assertEqual(payload["data"]["results"][0]["note"]["title"], "First note")
         self.assertIn("FTS", payload["data"]["results"][0]["snippet"])
+        self.assertNotIn("config_path", payload["meta"])
 
     def test_notes_search_rejects_empty_query(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

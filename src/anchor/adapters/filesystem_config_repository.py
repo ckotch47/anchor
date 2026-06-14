@@ -4,6 +4,7 @@ import copy
 import os
 import tempfile
 import tomllib
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -62,10 +63,7 @@ class FileSystemConfigRepository:
     def init_from_example(self, force: bool = False) -> tuple[AppConfig, Path]:
         if self._config_path.exists() and not force:
             raise FileExistsError(f"config already exists: {self._config_path}")
-        example_path = self._example_path()
-        if not example_path.exists():
-            raise FileNotFoundError(f"config example not found: {example_path}")
-        example_data = tomllib.loads(example_path.read_text(encoding="utf-8"))
+        example_data = tomllib.loads(self._example_text())
         config = AppConfig.model_validate(example_data or {})
         self.save(config)
         return config, self._config_path
@@ -110,5 +108,11 @@ class FileSystemConfigRepository:
         escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
 
-    def _example_path(self) -> Path:
-        return Path(__file__).resolve().parents[3] / "config.example.toml"
+    def _example_text(self) -> str:
+        package_example = resources.files("anchor").joinpath("config.example.toml")
+        if package_example.is_file():
+            return package_example.read_text(encoding="utf-8")
+        repo_example = Path(__file__).resolve().parents[3] / "config.example.toml"
+        if repo_example.exists():
+            return repo_example.read_text(encoding="utf-8")
+        raise FileNotFoundError(f"config example not found: {package_example}")

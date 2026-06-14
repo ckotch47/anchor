@@ -117,7 +117,9 @@ class FakeTasksRepository:
                     parent_document_id if parent_document_id is not None else self.created.parent_document_id
                 ),
                 "blocked_by_document_id": (
-                    blocked_by_document_id if blocked_by_document_id is not None else self.created.blocked_by_document_id
+                    blocked_by_document_id
+                    if blocked_by_document_id is not None
+                    else self.created.blocked_by_document_id
                 ),
             }
         )
@@ -283,7 +285,9 @@ class TasksServiceTest(unittest.TestCase):
         service = TasksService(repository=repo, project="workspace")
 
         with self.assertRaises(ValueError):
-            service.add(title="Ship tasks", body="Implement task slice", project="repo-a", parent_document_id="not-a-uuid")
+            service.add(
+                title="Ship tasks", body="Implement task slice", project="repo-a", parent_document_id="not-a-uuid"
+            )
 
     def test_delete_removes_task(self) -> None:
         repo = FakeTasksRepository()

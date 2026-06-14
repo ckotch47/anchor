@@ -479,7 +479,9 @@ class FilesServiceTest(unittest.TestCase):
                 del texts
                 return ChunkEmbeddingsResult(
                     model="fake",
-                    embeddings=[ChunkEmbeddingRecord(chunk_id=FILE_EMBEDDING_CHUNK_ID, model="fake", embedding=[1.0, 0.0])],
+                    embeddings=[
+                        ChunkEmbeddingRecord(chunk_id=FILE_EMBEDDING_CHUNK_ID, model="fake", embedding=[1.0, 0.0])
+                    ],
                 )
 
         class FakeRerankService:

@@ -45,6 +45,16 @@ class ConfigRepositoryTest(unittest.TestCase):
             self.assertEqual(created_path, config_path)
             self.assertEqual(config.runtime.default_project, "workspace")
 
+    def test_init_from_example_uses_packaged_example(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            repo = FileSystemConfigRepository(config_path=config_path)
+
+            config, created_path = repo.init_from_example(force=True)
+            self.assertTrue(config_path.exists())
+            self.assertEqual(created_path, config_path)
+            self.assertEqual(config.runtime.default_view, "compact")
+
     def test_init_from_example_rejects_existing_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.toml"
@@ -74,18 +84,13 @@ class ConfigRepositoryTest(unittest.TestCase):
 
             with sqlite3.connect(db_path) as connection:
                 tables = {
-                    row[0]
-                    for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+                    row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
                 }
                 version_rows = connection.execute("SELECT version FROM schema_migrations").fetchall()
                 fts_columns = {
-                    row[1]
-                    for row in connection.execute("PRAGMA table_info(document_chunks_fts)").fetchall()
+                    row[1] for row in connection.execute("PRAGMA table_info(document_chunks_fts)").fetchall()
                 }
-                task_columns = {
-                    row[1]
-                    for row in connection.execute("PRAGMA table_info(tasks)").fetchall()
-                }
+                task_columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)").fetchall()}
 
         self.assertEqual(result.applied, 6)
         self.assertEqual(result.current_version, 6)

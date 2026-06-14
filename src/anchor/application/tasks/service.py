@@ -142,7 +142,9 @@ class TasksService:
             tasks = tasks[:limit]
         return TasksListResult(
             count=len(tasks),
-            tasks=tasks if view == "full" else [
+            tasks=tasks
+            if view == "full"
+            else [
                 TaskListItem(
                     id=task.id,
                     title=task.title,

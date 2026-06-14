@@ -25,4 +25,3 @@ class MigrationService:
             current_version=result.current_version,
             applied_versions=list(result.applied_versions),
         )
-

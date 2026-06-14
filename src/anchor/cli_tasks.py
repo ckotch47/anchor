@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from anchor.application.tasks.models import TasksListResult, TasksSearchResult
-from anchor.cli_shared import build_success_payload, emit_error, parse_metatags, resolve_project, resolve_view
+from anchor.cli_shared import parse_metatags, resolve_project, resolve_view, response_formatter
 from anchor.container import build_container
 
 tasks_app = typer.Typer(add_completion=False, help="Tasks commands")
@@ -45,7 +45,7 @@ def tasks_add(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "tasks.add",
                     {"task": result.model_dump()},
                     container,
@@ -56,9 +56,9 @@ def tasks_add(
             )
         )
     except ValueError as exc:
-        emit_error("tasks", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("tasks", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
 
 
 @tasks_app.command(name="update")
@@ -96,7 +96,7 @@ def tasks_update(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "tasks.update",
                     {"task": result.model_dump()},
                     container,
@@ -107,11 +107,11 @@ def tasks_update(
             )
         )
     except LookupError as exc:
-        emit_error("tasks", "NOT_FOUND", str(exc))
+        response_formatter.emit_error("tasks", "NOT_FOUND", str(exc))
     except ValueError as exc:
-        emit_error("tasks", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("tasks", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
 
 
 @tasks_app.command(name="list")
@@ -133,7 +133,7 @@ def tasks_list(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "tasks.list",
                     {
                         "count": result.count,
@@ -149,9 +149,9 @@ def tasks_list(
             )
         )
     except ValueError as exc:
-        emit_error("tasks", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("tasks", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
 
 
 @tasks_app.command(name="search")
@@ -173,25 +173,21 @@ def tasks_search(
         )
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_search(
                     "tasks.search",
-                    {
-                        "query": result.query,
-                        "count": result.count,
-                        "results": [hit.model_dump() for hit in result.results],
-                    },
+                    result,
                     container,
                     view=view,
-                    extra_meta={"project": resolved_project},
+                    project=resolved_project,
                 ),
                 ensure_ascii=False,
                 indent=2,
             )
         )
     except ValueError as exc:
-        emit_error("tasks", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("tasks", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
 
 
 @tasks_app.command(name="done")
@@ -206,7 +202,7 @@ def tasks_done(
         result = container.tasks_service.done(task_id, project=resolved_project)
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "tasks.done",
                     {"task": result.model_dump()},
                     container,
@@ -217,11 +213,11 @@ def tasks_done(
             )
         )
     except LookupError as exc:
-        emit_error("tasks", "NOT_FOUND", str(exc))
+        response_formatter.emit_error("tasks", "NOT_FOUND", str(exc))
     except ValueError as exc:
-        emit_error("tasks", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("tasks", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
 
 
 @tasks_app.command(name="delete")
@@ -236,7 +232,7 @@ def tasks_delete(
         result = container.tasks_service.delete(task_id, project=resolved_project)
         typer.echo(
             json.dumps(
-                build_success_payload(
+                response_formatter.format_success(
                     "tasks.delete",
                     {"task": result.model_dump()},
                     container,
@@ -247,8 +243,8 @@ def tasks_delete(
             )
         )
     except LookupError as exc:
-        emit_error("tasks", "NOT_FOUND", str(exc))
+        response_formatter.emit_error("tasks", "NOT_FOUND", str(exc))
     except ValueError as exc:
-        emit_error("tasks", "INVALID_ARGS", str(exc))
+        response_formatter.emit_error("tasks", "INVALID_ARGS", str(exc))
     except Exception as exc:
-        emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))
+        response_formatter.emit_error("tasks", "DB_MIGRATION_FAILED", str(exc))

@@ -8,34 +8,111 @@ import typer
 from anchor.application.system.config_service import ConfigResult
 
 
-def emit_error(command: str, code: str, message: str) -> None:
-    payload = {
-        "ok": False,
-        "command": command,
-        "error": {
-            "code": code,
-            "message": message,
-            "retryable": False,
-        },
-    }
-    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
-    raise typer.Exit(code=1)
+class ResponseEnvelopeFormatter:
+    def emit_error(self, command: str, code: str, message: str) -> None:
+        typer.echo(json.dumps(self.format_error(command, code, message), ensure_ascii=False, indent=2))
+        raise typer.Exit(code=1)
+
+    def format_error(self, command: str, code: str, message: str, *, retryable: bool = False) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "command": command,
+            "error": {
+                "code": code,
+                "message": message,
+                "retryable": retryable,
+            },
+        }
+
+    def format_config(self, command: str, result: ConfigResult, container: Any) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "command": command,
+            "data": {
+                "config": result.config.model_dump(),
+                "config_path": result.config_path,
+                "profile_name": result.profile_name,
+            },
+            "meta": {
+                "view": result.config.runtime.default_view,
+                "profile": result.profile_name or container.profile_name,
+            },
+        }
+
+    def format_success(
+        self,
+        command: str,
+        data: dict[str, Any],
+        container: Any,
+        *,
+        view: str | None = None,
+        include_config_path: bool | None = None,
+        profile: str | None = None,
+        extra_meta: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        resolved_view = resolve_view(container, view)
+        if include_config_path is None:
+            include_config_path = resolved_view == "full"
+        meta: dict[str, Any] = {
+            "view": resolved_view,
+            "profile": profile or container.profile_name,
+        }
+        if include_config_path:
+            meta["config_path"] = str(container.config_path)
+        if extra_meta:
+            meta.update(extra_meta)
+        return {
+            "ok": True,
+            "command": command,
+            "data": data,
+            "meta": meta,
+        }
+
+    def format_search(
+        self,
+        command: str,
+        result: Any,
+        container: Any,
+        *,
+        view: str | None = None,
+        profile: str | None = None,
+        project: str | None = None,
+        projects: list[str] | None = None,
+        types: list[str] | None = None,
+        explain: bool = False,
+    ) -> dict[str, Any]:
+        resolved_view = resolve_view(container, view)
+        data = result.model_dump(exclude_none=True)
+        if resolved_view == "compact":
+            data.pop("query", None)
+            for hit in data.get("results", []):
+                if isinstance(hit, dict):
+                    hit.pop("attributes", None)
+        if not explain:
+            data.pop("stats", None)
+        meta: dict[str, Any] = {
+            "view": resolved_view,
+            "profile": profile or container.profile_name,
+        }
+        if resolved_view == "full":
+            meta["config_path"] = str(container.config_path)
+        if project is not None:
+            meta["project"] = project
+        if projects is not None:
+            meta["projects"] = projects
+        if types is not None:
+            meta["types"] = types
+        if explain:
+            meta["explain"] = explain
+        return {
+            "ok": True,
+            "command": command,
+            "data": data,
+            "meta": meta,
+        }
 
 
-def config_payload(command: str, result: ConfigResult, container: Any) -> dict[str, Any]:
-    return {
-        "ok": True,
-        "command": command,
-        "data": {
-            "config": result.config.model_dump(),
-            "config_path": result.config_path,
-            "profile_name": result.profile_name,
-        },
-        "meta": {
-            "view": result.config.runtime.default_view,
-            "profile": result.profile_name or container.profile_name,
-        },
-    }
+response_formatter = ResponseEnvelopeFormatter()
 
 
 def resolve_view(container: Any, view: str | None) -> str:
@@ -45,32 +122,6 @@ def resolve_view(container: Any, view: str | None) -> str:
     if normalized not in {"compact", "full"}:
         raise ValueError("view must be 'compact' or 'full'")
     return normalized
-
-
-def build_success_payload(
-    command: str,
-    data: dict[str, Any],
-    container: Any,
-    *,
-    view: str | None = None,
-    include_config_path: bool = True,
-    profile: str | None = None,
-    extra_meta: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    meta: dict[str, Any] = {
-        "view": resolve_view(container, view),
-        "profile": profile or container.profile_name,
-    }
-    if include_config_path:
-        meta["config_path"] = str(container.config_path)
-    if extra_meta:
-        meta.update(extra_meta)
-    return {
-        "ok": True,
-        "command": command,
-        "data": data,
-        "meta": meta,
-    }
 
 
 def parse_metatags(raw_value: str | None) -> dict[str, object]:

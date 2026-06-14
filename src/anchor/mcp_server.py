@@ -8,7 +8,7 @@ from mcp.types import CallToolResult
 from anchor.application.files.models import FilesGetResult, FilesListResult
 from anchor.application.history.models import HistorySearchResult
 from anchor.application.retrieval.search_query import SearchQuery
-from anchor.cli_shared import build_success_payload, config_payload, resolve_project, resolve_view
+from anchor.cli_shared import resolve_project, resolve_view, response_formatter
 from anchor.container import build_container
 
 mcp_app = FastMCP(name="anchor", instructions="Local CLI tool for agents")
@@ -18,11 +18,21 @@ def _container(profile: str | None = None):
     return build_container(profile=profile)
 
 
-def _tool_result(command: str, data: dict[str, Any], container: Any, *, project: str | None = None, extra_meta: dict[str, Any] | None = None, is_error: bool = False) -> CallToolResult:
-    payload = build_success_payload(
+def _tool_result(
+    command: str,
+    data: dict[str, Any],
+    container: Any,
+    *,
+    project: str | None = None,
+    view: str | None = None,
+    extra_meta: dict[str, Any] | None = None,
+    is_error: bool = False,
+) -> CallToolResult:
+    payload = response_formatter.format_success(
         command,
         data,
         container,
+        view=view,
         extra_meta={"project": project or container.config.runtime.default_project, **(extra_meta or {})},
     )
     return CallToolResult(content=[], structuredContent=payload, isError=is_error)
@@ -31,15 +41,7 @@ def _tool_result(command: str, data: dict[str, Any], container: Any, *, project:
 def _failure(command: str, code: str, message: str, container: Any) -> CallToolResult:
     return CallToolResult(
         content=[],
-        structuredContent={
-            "ok": False,
-            "command": command,
-            "error": {
-                "code": code,
-                "message": message,
-                "retryable": False,
-            },
-        },
+        structuredContent=response_formatter.format_error(command, code, message),
         isError=True,
     )
 
@@ -50,16 +52,12 @@ def health(profile: str | None = None) -> dict[str, Any]:
     result = container.health_service.health()
     return CallToolResult(
         content=[],
-        structuredContent={
-            "ok": True,
-            "command": "health",
-            "data": result.model_dump(),
-            "meta": {
-                "view": container.config.runtime.default_view,
-                "profile": container.profile_name,
-                "config_path": str(container.config_path),
-            },
-        },
+        structuredContent=response_formatter.format_success(
+            "health",
+            result.model_dump(),
+            container,
+            view=container.config.runtime.default_view,
+        ),
     )
 
 
@@ -67,14 +65,18 @@ def health(profile: str | None = None) -> dict[str, Any]:
 def config_get(profile: str | None = None) -> dict[str, Any]:
     container = _container(profile)
     result = container.config_service.get(profile=profile)
-    return CallToolResult(content=[], structuredContent=config_payload("config.get", result, container))
+    return CallToolResult(
+        content=[], structuredContent=response_formatter.format_config("config.get", result, container)
+    )
 
 
 @mcp_app.tool(name="config_set", description="Update one config field")
 def config_set(section: str, key: str, value: str, profile: str | None = None) -> dict[str, Any]:
     container = _container(profile)
     result = container.config_service.set(section=section, key=key, value=value, profile=profile)
-    return CallToolResult(content=[], structuredContent=config_payload("config.set", result, container))
+    return CallToolResult(
+        content=[], structuredContent=response_formatter.format_config("config.set", result, container)
+    )
 
 
 @mcp_app.tool(name="config_init", description="Initialize config from config.example.toml")
@@ -82,20 +84,7 @@ def config_init(force: bool = False, profile: str | None = None) -> dict[str, An
     container = _container(profile)
     result = container.config_service.init(force=force)
     return CallToolResult(
-        content=[],
-        structuredContent={
-            "ok": True,
-            "command": "config.init",
-            "data": {
-                "config": result.config.model_dump(),
-                "config_path": result.config_path,
-                "profile_name": result.profile_name,
-            },
-            "meta": {
-                "view": result.config.runtime.default_view,
-                "profile": container.profile_name,
-            },
-        },
+        content=[], structuredContent=response_formatter.format_config("config.init", result, container)
     )
 
 
@@ -273,9 +262,16 @@ def notes_search(
     result = container.notes_service.search(query=query, limit=limit, project=resolved_project, view=resolved_view)
     return _tool_result(
         "notes.search",
-        {"query": result.query, "count": result.count, "results": [hit.model_dump() for hit in result.results]},
+        response_formatter.format_search(
+            "notes.search",
+            result,
+            container,
+            view=resolved_view,
+            project=resolved_project,
+        )["data"],
         container,
         project=resolved_project,
+        view=resolved_view,
         extra_meta={"view": resolved_view},
     )
 
@@ -350,9 +346,16 @@ def history_search(
     )
     return _tool_result(
         "history.search",
-        {"query": result.query, "count": result.count, "results": [hit.model_dump() for hit in result.results]},
+        response_formatter.format_search(
+            "history.search",
+            result,
+            container,
+            view=resolved_view,
+            project=resolved_project,
+        )["data"],
         container,
         project=resolved_project,
+        view=resolved_view,
         extra_meta={"view": resolved_view},
     )
 
@@ -478,9 +481,16 @@ def tasks_search(
     result = container.tasks_service.search(query=query, limit=limit, project=resolved_project, view=resolved_view)
     return _tool_result(
         "tasks.search",
-        {"query": result.query, "count": result.count, "results": [hit.model_dump() for hit in result.results]},
+        response_formatter.format_search(
+            "tasks.search",
+            result,
+            container,
+            view=resolved_view,
+            project=resolved_project,
+        )["data"],
         container,
         project=resolved_project,
+        view=resolved_view,
         extra_meta={"view": resolved_view},
     )
 
@@ -543,7 +553,14 @@ def files_get(
         return _failure("files.get", "NOT_FOUND", str(exc), container)
     except ValueError as exc:
         return _failure("files.get", "INVALID_ARGS", str(exc), container)
-    return _tool_result("files.get", {"file": result.file.model_dump()}, container, project=resolved_project, extra_meta={"view": resolved_view})
+    return _tool_result(
+        "files.get",
+        {"file": result.file.model_dump()},
+        container,
+        project=resolved_project,
+        view=resolved_view,
+        extra_meta={"view": resolved_view},
+    )
 
 
 @mcp_app.tool(name="files_delete", description="Delete one indexed file by id or path")
@@ -609,6 +626,7 @@ def files_list(
         },
         container,
         project=resolved_project,
+        view=resolved_view,
         extra_meta={"view": resolved_view},
     )
 
@@ -643,14 +661,17 @@ def files_search(
     )
     return _tool_result(
         "files.search",
-        {
-            "query": result.query,
-            "count": result.count,
-            "results": [hit.model_dump() for hit in result.results],
-            **({"stats": result.stats} if result.stats is not None else {}),
-        },
+        response_formatter.format_search(
+            "files.search",
+            result,
+            container,
+            view=resolved_view,
+            project=resolved_project,
+            explain=explain,
+        )["data"],
         container,
         project=resolved_project,
+        view=resolved_view,
         extra_meta={"view": resolved_view, "explain": explain},
     )
 
@@ -678,18 +699,26 @@ def search(
             project=resolved_project,
             projects=projects,
             limit=limit,
-            budget_tokens=budget_tokens if budget_tokens is not None else container.config.runtime.default_budget_tokens,
+            budget_tokens=budget_tokens
+            if budget_tokens is not None
+            else container.config.runtime.default_budget_tokens,
             explain=explain,
             cursor=cursor,
             weights=weights or {},
         )
         result = container.search_service.search(search_query)
-        data = result.model_dump(exclude_none=True)
-        if not explain and isinstance(data, dict):
-            data.pop("stats", None)
         return _tool_result(
             "search",
-            data,
+            response_formatter.format_search(
+                "search",
+                result,
+                container,
+                view=view,
+                project=resolved_project,
+                projects=search_query.projects or [resolved_project],
+                types=search_query.types,
+                explain=explain,
+            )["data"],
             container,
             view=view,
             extra_meta={
@@ -697,6 +726,7 @@ def search(
                 "projects": search_query.projects or [resolved_project],
                 "types": search_query.types,
                 "explain": explain,
+                "view": view or container.config.runtime.default_view,
             },
         )
     except ValueError as exc:

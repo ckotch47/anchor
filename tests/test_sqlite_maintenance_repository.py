@@ -33,7 +33,9 @@ class SqliteMaintenanceRepositoryTest(unittest.TestCase):
             )
 
             with sqlite3.connect(db_path) as connection:
-                connection.execute("DELETE FROM document_chunks_fts WHERE document_type = 'note' AND document_id = ?", (note.id,))
+                connection.execute(
+                    "DELETE FROM document_chunks_fts WHERE document_type = 'note' AND document_id = ?", (note.id,)
+                )
                 connection.commit()
 
             self.assertEqual(notes_repository.search("rebuild", limit=10, project="repo-a"), [])
@@ -106,7 +108,9 @@ class SqliteMaintenanceRepositoryTest(unittest.TestCase):
             )
 
             with sqlite3.connect(db_path) as connection:
-                connection.execute("DELETE FROM document_chunks_fts WHERE document_type = 'note' AND document_id = ?", (note.id,))
+                connection.execute(
+                    "DELETE FROM document_chunks_fts WHERE document_type = 'note' AND document_id = ?", (note.id,)
+                )
                 connection.execute(
                     """
                     INSERT INTO settings (scope, key, value, updated_at)
