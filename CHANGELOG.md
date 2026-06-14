@@ -4,6 +4,7 @@
 
 | Date | Type | Scope | What | Why | Ref |
 |---|---|---|---|---|---|
+| 2026-06-14 | Added | docs | Added a Russian `wiki/MCP.md` page so the wiki export has a complete MCP transport entry. | To remove the broken wiki link and document the stdio transport alongside the rest of the operator manual. | `wiki/MCP.md`, `wiki/README.md`, `wiki/Главная.md` |
 | 2026-06-14 | Changed | mcp | Switched MCP tool results to `CallToolResult` with empty text content and kept the machine payload in `structuredContent` only. | To remove the duplicated JSON text block from stdio tool calls and reduce token burn for agent clients. | `src/anchor/mcp_server.py`, `tests/test_mcp_server.py` |
 | 2026-06-14 | Added | docs | Added a Russian wiki page with an example agent skill template for Anchor integration. | To give new contributors a copyable pattern for wiring an agent to Anchor without re-deriving the operating rules. | `wiki/Скилл.md`, `wiki/Главная.md`, `wiki/README.md`, `wiki/Использование.md` |
 | 2026-06-14 | Changed | devx | Added a `make build` target for building release wheels and sdists, and documented the wheel-based install flow as the normal distribution path. | To make packaged releases a first-class install path instead of an ad hoc `python -m build` step. | `Makefile`, `pyproject.toml`, `README.md`, `wiki/Установка.md` |
