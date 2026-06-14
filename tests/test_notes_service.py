@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import unittest
 
+from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.application.embeddings.models import ChunkEmbeddingRecord, DocumentChunkRecord
 from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.notes.models import NoteRecord, NoteSearchItem, NotesSearchCandidate
 from anchor.application.notes.service import NotesService
 from anchor.application.retrieval.document_chunking import DocumentChunkingService
 from anchor.application.retrieval.rerank_service import RerankService
+
+NOTE_ID = uuid7_str()
+NOTE_OTHER_ID = uuid7_str()
+NOTE_CHUNK_ID = uuid7_str()
+NOTE_LEX_CHUNK_ID = uuid7_str()
+NOTE_VEC_CHUNK_ID = uuid7_str()
 
 
 class FakeNotesRepository:
@@ -30,7 +37,7 @@ class FakeNotesRepository:
         chunks,
     ):
         self.created = NoteRecord(
-            id="note_1",
+            id=NOTE_ID,
             project=project,
             metatags=metatags or {},
             title=title,
@@ -45,8 +52,8 @@ class FakeNotesRepository:
         )
         self._chunks = [
             DocumentChunkRecord(
-                id="chunk_1",
-                document_id="note_1",
+                id=NOTE_CHUNK_ID,
+                document_id=NOTE_ID,
                 project="workspace",
                 metatags={},
                 chunk_index=0,
@@ -87,7 +94,7 @@ class FakeNotesRepository:
         if chunks is not None:
             self._chunks = [
                 DocumentChunkRecord(
-                    id="chunk_1",
+                    id=NOTE_CHUNK_ID,
                     document_id=note_id,
                     project=project,
                     metatags=updated.metatags,
@@ -106,7 +113,7 @@ class FakeNotesRepository:
         return self.created if self.created and self.created.id == note_id else None
 
     def list_chunks(self, document_id: str):
-        return self._chunks if document_id == "note_1" else []
+        return self._chunks if document_id == NOTE_ID else []
 
     def store_chunk_embeddings(self, embeddings, *, project: str, metatags: str, created_at: str):
         self.stored_embeddings.extend(embeddings)
@@ -155,7 +162,7 @@ class SearchPipelineRepository(FakeNotesRepository):
     def __init__(self) -> None:
         super().__init__()
         self.note_one = NoteRecord(
-            id="note_1",
+            id=NOTE_ID,
             project="repo-a",
             metatags={},
             title="Alpha note",
@@ -169,7 +176,7 @@ class SearchPipelineRepository(FakeNotesRepository):
             updated_at="2026-06-13T00:00:00+00:00",
         )
         self.note_two = NoteRecord(
-            id="note_2",
+            id=NOTE_OTHER_ID,
             project="repo-a",
             metatags={},
             title="Beta note",
@@ -194,7 +201,7 @@ class SearchPipelineRepository(FakeNotesRepository):
                     pinned=self.note_one.pinned,
                     created_at=self.note_one.created_at,
                 ),
-                chunk_id="chunk_lex_1",
+                chunk_id=NOTE_LEX_CHUNK_ID,
                 snippet="alpha lexical snippet with many words to consume budget",
                 token_count=8,
                 lexical_score=0.95,
@@ -207,7 +214,7 @@ class SearchPipelineRepository(FakeNotesRepository):
                     pinned=self.note_two.pinned,
                     created_at=self.note_two.created_at,
                 ),
-                chunk_id="chunk_lex_2",
+                chunk_id=uuid7_str(),
                 snippet="beta lexical snippet that will be trimmed later",
                 token_count=8,
                 lexical_score=0.85,
@@ -225,7 +232,7 @@ class SearchPipelineRepository(FakeNotesRepository):
                     pinned=self.note_one.pinned,
                     created_at=self.note_one.created_at,
                 ),
-                chunk_id="chunk_vec_1",
+                chunk_id=NOTE_VEC_CHUNK_ID,
                 snippet="alpha vector snippet with many words to consume budget",
                 token_count=8,
                 vector_score=0.99,
@@ -238,7 +245,7 @@ class SearchPipelineRepository(FakeNotesRepository):
                     pinned=self.note_two.pinned,
                     created_at=self.note_two.created_at,
                 ),
-                chunk_id="chunk_vec_2",
+                chunk_id=uuid7_str(),
                 snippet="beta vector snippet that will be trimmed later",
                 token_count=8,
                 vector_score=0.80,
@@ -258,8 +265,8 @@ class NotesServiceTest(unittest.TestCase):
 
         note = service.add(title="Hello", body="one two three", source="cli")
 
-        self.assertEqual(note.id, "note_1")
-        self.assertEqual(repo.pending_embedding_ids, ["note_1"])
+        self.assertEqual(note.id, NOTE_ID)
+        self.assertEqual(repo.pending_embedding_ids, [NOTE_ID])
         self.assertEqual(len(repo.stored_embeddings), 0)
 
     def test_update_requeues_embeddings(self) -> None:
@@ -272,11 +279,11 @@ class NotesServiceTest(unittest.TestCase):
         )
 
         service.add(title="Hello", body="one two three", source="cli")
-        updated = service.update("note_1", title="Hello again", body="four five six")
+        updated = service.update(NOTE_ID, title="Hello again", body="four five six")
 
         self.assertEqual(updated.title, "Hello again")
         self.assertEqual(updated.body, "four five six")
-        self.assertEqual(repo.pending_embedding_ids, ["note_1"])
+        self.assertEqual(repo.pending_embedding_ids, [NOTE_ID])
         self.assertEqual(len(repo.stored_embeddings), 0)
 
     def test_search_drains_pending_embeddings(self) -> None:
@@ -311,7 +318,7 @@ class NotesServiceTest(unittest.TestCase):
         service.add(title="Hello", body="one two three", source="cli")
 
         with self.assertRaises(ValueError):
-            service.update("note_1")
+            service.update(NOTE_ID)
 
     def test_search_deduplicates_by_note_id(self) -> None:
         repo = SearchPipelineRepository()
@@ -329,7 +336,7 @@ class NotesServiceTest(unittest.TestCase):
         result = service.search("alpha", limit=4, project="repo-a")
 
         self.assertEqual(result.count, 2)
-        self.assertEqual([item.note.id for item in result.results], ["note_1", "note_2"])
+        self.assertEqual([item.note.id for item in result.results], [NOTE_ID, NOTE_OTHER_ID])
 
     def test_search_trims_to_budget(self) -> None:
         repo = SearchPipelineRepository()
@@ -347,7 +354,7 @@ class NotesServiceTest(unittest.TestCase):
         result = service.search("alpha", limit=4, project="repo-a")
 
         self.assertEqual(result.count, 1)
-        self.assertEqual(result.results[0].note.id, "note_1")
+        self.assertEqual(result.results[0].note.id, NOTE_ID)
 
     def test_token_count_handles_punctuation_and_cjk(self) -> None:
         from anchor.application.retrieval.document_chunking import count_tokens
@@ -368,7 +375,7 @@ class NotesServiceTest(unittest.TestCase):
         result = service.search("alpha", limit=4, project="repo-a")
 
         self.assertEqual(result.count, 2)
-        self.assertEqual([item.note.id for item in result.results], ["note_1", "note_2"])
+        self.assertEqual([item.note.id for item in result.results], [NOTE_ID, NOTE_OTHER_ID])
 
     def test_delete_removes_note_from_repository(self) -> None:
         repo = FakeNotesRepository()
@@ -379,9 +386,9 @@ class NotesServiceTest(unittest.TestCase):
         )
 
         service.add(title="Hello", body="one two three", source="cli")
-        deleted = service.delete("note_1")
+        deleted = service.delete(NOTE_ID)
 
-        self.assertEqual(deleted.id, "note_1")
+        self.assertEqual(deleted.id, NOTE_ID)
         self.assertIsNone(repo.created)
         with self.assertRaises(LookupError):
-            service.get("note_1")
+            service.get(NOTE_ID)

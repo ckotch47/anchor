@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import unittest
 
+from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.application.tasks.models import TaskListItem, TaskRecord, TaskSearchHit
 from anchor.application.tasks.service import TasksService
+
+TASK_ID = uuid7_str()
+TASK_LIST_ID = uuid7_str()
+TASK_OTHER_ID = uuid7_str()
+TASK_CHUNK_ID = uuid7_str()
+TASK_PARENT_ID = uuid7_str()
+TASK_BLOCKED_BY_ID = uuid7_str()
 
 
 class FakeTasksRepository:
@@ -28,7 +36,7 @@ class FakeTasksRepository:
         blocked_by_document_id: str | None = None,
     ) -> TaskRecord:
         self.created = TaskRecord(
-            id="task_1",
+            id=TASK_ID,
             project=project,
             metatags=metatags or {},
             title=title,
@@ -52,7 +60,7 @@ class FakeTasksRepository:
     def list(self, limit: int, *, project: str):
         return [
             TaskListItem(
-                id="task_1",
+                id=TASK_LIST_ID,
                 title="Task one",
                 status="open",
                 priority=0,
@@ -112,8 +120,8 @@ class FakeTasksRepository:
         del query, project
         return [
             TaskSearchHit(
-                task=TaskListItem(id="task_1", title="Task one", status="open", priority=0),
-                chunk_id="chunk_1",
+                task=TaskListItem(id=TASK_ID, title="Task one", status="open", priority=0),
+                chunk_id=TASK_CHUNK_ID,
                 score=0.9,
                 snippet="Task one snippet",
             )
@@ -133,14 +141,14 @@ class BudgetedTasksRepository(FakeTasksRepository):
         del query, project
         return [
             TaskSearchHit(
-                task=TaskListItem(id="task_1", title="Task one", status="open", priority=0),
-                chunk_id="chunk_1",
+                task=TaskListItem(id=TASK_ID, title="Task one", status="open", priority=0),
+                chunk_id=TASK_CHUNK_ID,
                 score=0.9,
                 snippet="Task one snippet with extra words",
             ),
             TaskSearchHit(
-                task=TaskListItem(id="task_2", title="Task two", status="open", priority=0),
-                chunk_id="chunk_2",
+                task=TaskListItem(id=TASK_OTHER_ID, title="Task two", status="open", priority=0),
+                chunk_id=uuid7_str(),
                 score=0.8,
                 snippet="Task two snippet with extra words",
             ),
@@ -160,19 +168,20 @@ class TasksServiceTest(unittest.TestCase):
             task_kind="task",
             priority=3,
             due_at="2026-06-30T00:00:00+00:00",
-            parent_document_id="task_parent",
-            blocked_by_document_id="task_blocker",
+            parent_document_id=TASK_PARENT_ID,
+            blocked_by_document_id=TASK_BLOCKED_BY_ID,
         )
         listing = service.list(project="repo-a")
-        done = service.done("task_1", project="repo-a")
+        done = service.done(TASK_ID, project="repo-a")
 
-        self.assertEqual(task.id, "task_1")
+        self.assertEqual(task.id, TASK_ID)
         self.assertEqual(task.project, "repo-a")
         self.assertEqual(task.metatags, {"topic": "tasks"})
         self.assertEqual(task.priority, 3)
-        self.assertEqual(task.parent_document_id, "task_parent")
+        self.assertEqual(task.parent_document_id, TASK_PARENT_ID)
+        self.assertEqual(task.blocked_by_document_id, TASK_BLOCKED_BY_ID)
         self.assertEqual(listing.count, 1)
-        self.assertEqual(listing.tasks[0].id, "task_1")
+        self.assertEqual(listing.tasks[0].id, TASK_LIST_ID)
         self.assertEqual(done.status, "done")
         self.assertIsNotNone(repo.completed)
 
@@ -193,7 +202,7 @@ class TasksServiceTest(unittest.TestCase):
         result = service.search("deploy", project="repo-a")
 
         self.assertEqual(result.count, 1)
-        self.assertEqual(result.results[0].task.id, "task_1")
+        self.assertEqual(result.results[0].task.id, TASK_ID)
 
     def test_update_changes_fields(self) -> None:
         repo = FakeTasksRepository()
@@ -201,7 +210,7 @@ class TasksServiceTest(unittest.TestCase):
 
         service.add(title="Ship tasks", body="Implement task slice", project="repo-a")
         updated = service.update(
-            "task_1",
+            TASK_ID,
             title="Ship tasks v2",
             priority=5,
             due_at="2026-07-01T00:00:00+00:00",
@@ -221,7 +230,7 @@ class TasksServiceTest(unittest.TestCase):
         service.add(title="Ship tasks", body="Implement task slice", project="repo-a")
 
         with self.assertRaises(ValueError):
-            service.update("task_1", project="repo-a")
+            service.update(TASK_ID, project="repo-a")
 
     def test_add_rejects_empty_title(self) -> None:
         repo = FakeTasksRepository()
@@ -230,14 +239,21 @@ class TasksServiceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             service.add(title=" ", body="text")
 
+    def test_add_rejects_non_uuidv7_parent_reference(self) -> None:
+        repo = FakeTasksRepository()
+        service = TasksService(repository=repo, project="workspace")
+
+        with self.assertRaises(ValueError):
+            service.add(title="Ship tasks", body="Implement task slice", project="repo-a", parent_document_id="not-a-uuid")
+
     def test_delete_removes_task(self) -> None:
         repo = FakeTasksRepository()
         service = TasksService(repository=repo, project="workspace")
 
         service.add(title="Ship tasks", body="Implement task slice", project="repo-a")
-        deleted = service.delete("task_1", project="repo-a")
+        deleted = service.delete(TASK_ID, project="repo-a")
 
-        self.assertEqual(deleted.id, "task_1")
+        self.assertEqual(deleted.id, TASK_ID)
         self.assertIsNone(repo.created)
         with self.assertRaises(LookupError):
-            service.done("task_1", project="repo-a")
+            service.done(TASK_ID, project="repo-a")

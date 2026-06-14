@@ -75,6 +75,7 @@ Derived and operational tables:
 - `tasks` support one-parent nesting and one-primary-blocker references directly, while `document_links` remains the general graph for richer cross-entity relations.
 - `memory` is a read model over the domain tables, not a separate source of truth.
 - Derived search data must be rebuildable from the canonical tables.
+- Primary ids and opaque reference ids are UUIDv7 strings: entity ids, chunk ids, `parent_document_id`, `blocked_by_document_id`, and `correlation_id`.
 
 ## Retrieval contract
 

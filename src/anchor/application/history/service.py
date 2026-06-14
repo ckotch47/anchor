@@ -4,6 +4,7 @@ import json
 from collections import OrderedDict
 
 from anchor.adapters.sqlite_history_repository import SqliteHistoryRepository
+from anchor.adapters.sqlite_ids import ensure_uuid7_str, uuid7_str
 from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.history.models import (
     HistoryListItem,
@@ -41,19 +42,24 @@ class HistoryService:
         entry_type: str,
         payload: str,
         actor: str = "agent",
-        correlation_id: str = "",
+        correlation_id: str | None = None,
         project: str | None = None,
         metatags: dict[str, object] | None = None,
     ) -> HistoryRecord:
         self._require_non_empty(entry_type, "entry_type")
         self._require_non_empty(payload, "payload")
         resolved_project = project or self._project
+        if correlation_id is not None and correlation_id.strip():
+            ensure_uuid7_str(correlation_id, "correlation_id")
+            resolved_correlation_id = correlation_id
+        else:
+            resolved_correlation_id = uuid7_str()
         chunks = self._chunking_service.chunk_note(title=entry_type, body=payload)
         result = self._repository.append(
             entry_type=entry_type,
             payload=payload,
             actor=actor,
-            correlation_id=correlation_id,
+            correlation_id=resolved_correlation_id,
             project=resolved_project,
             metatags=metatags or {},
             chunks=chunks,
@@ -77,6 +83,8 @@ class HistoryService:
             self._require_non_empty(entry_type, "entry_type")
         if payload is not None:
             self._require_non_empty(payload, "payload")
+        if correlation_id is not None:
+            ensure_uuid7_str(correlation_id, "correlation_id")
         if all(value is None for value in (entry_type, payload, actor, correlation_id, metatags)):
             raise ValueError("update requires at least one field")
         resolved_project = project or self._project

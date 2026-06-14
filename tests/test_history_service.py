@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import unittest
+import uuid
 
+from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.application.embeddings.models import ChunkEmbeddingRecord, DocumentChunkRecord
 from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.history.models import HistoryListItem, HistoryRecord, HistorySearchCandidate
 from anchor.application.history.service import HistoryService
 from anchor.application.retrieval.document_chunking import DocumentChunkingService
 from anchor.application.retrieval.rerank_service import RerankService
+
+HISTORY_ID = uuid7_str()
+HISTORY_CHUNK_ID = uuid7_str()
 
 
 class FakeHistoryRepository:
@@ -30,7 +35,7 @@ class FakeHistoryRepository:
         chunks,
     ) -> HistoryRecord:
         self.created = HistoryRecord(
-            id="history_1",
+            id=HISTORY_ID,
             project=project,
             metatags=metatags or {},
             entry_type=entry_type,
@@ -42,8 +47,8 @@ class FakeHistoryRepository:
         )
         self._chunks = [
             DocumentChunkRecord(
-                id="chunk_1",
-                document_id="history_1",
+                id=HISTORY_CHUNK_ID,
+                document_id=HISTORY_ID,
                 project=project,
                 metatags=metatags or {},
                 chunk_index=0,
@@ -86,7 +91,7 @@ class FakeHistoryRepository:
         if chunks is not None:
             self._chunks = [
                 DocumentChunkRecord(
-                    id="chunk_1",
+                    id=HISTORY_CHUNK_ID,
                     document_id=history_id,
                     project=project,
                     metatags=updated.metatags,
@@ -108,7 +113,7 @@ class FakeHistoryRepository:
         return self.deleted
 
     def list_chunks(self, document_id: str):
-        return self._chunks if document_id == "history_1" else []
+        return self._chunks if document_id == HISTORY_ID else []
 
     def store_chunk_embeddings(self, embeddings, *, project: str, metatags: str, created_at: str):
         del project, metatags, created_at
@@ -145,7 +150,7 @@ class FakeHistoryRepository:
                     correlation_id=self.created.correlation_id,
                     created_at=self.created.created_at,
                 ),
-                chunk_id="chunk_1",
+                chunk_id=HISTORY_CHUNK_ID,
                 snippet="history search snippet with useful words",
                 token_count=6,
                 lexical_score=0.75,
@@ -166,7 +171,7 @@ class FakeHistoryRepository:
                     correlation_id=self.created.correlation_id,
                     created_at=self.created.created_at,
                 ),
-                chunk_id="chunk_1",
+                chunk_id=HISTORY_CHUNK_ID,
                 snippet="history vector snippet with more detail",
                 token_count=7,
                 vector_score=0.9,
@@ -192,8 +197,9 @@ class HistoryServiceTest(unittest.TestCase):
 
         history = service.append(entry_type="deploy", payload="one two three", project="repo-a")
 
-        self.assertEqual(history.id, "history_1")
-        self.assertEqual(repo.pending_embedding_ids, ["history_1"])
+        self.assertEqual(history.id, HISTORY_ID)
+        self.assertEqual(uuid.UUID(history.correlation_id).version, 7)
+        self.assertEqual(repo.pending_embedding_ids, [HISTORY_ID])
         self.assertEqual(len(repo.stored_embeddings), 0)
 
     def test_search_drains_pending_embeddings_and_returns_hits(self) -> None:
@@ -211,7 +217,7 @@ class HistoryServiceTest(unittest.TestCase):
         result = service.search("deploy", project="repo-a")
 
         self.assertEqual(result.count, 1)
-        self.assertEqual(result.results[0].history.id, "history_1")
+        self.assertEqual(result.results[0].history.id, HISTORY_ID)
         self.assertEqual(repo.pending_embedding_ids, [])
         self.assertGreater(len(repo.stored_embeddings), 0)
         self.assertEqual(result.results[0].history.project, "repo-a")
@@ -226,11 +232,22 @@ class HistoryServiceTest(unittest.TestCase):
         )
 
         service.append(entry_type="deploy", payload="one two three", project="repo-a")
-        updated = service.update("history_1", payload="four five six", actor="bot", project="repo-a")
+        updated = service.update(HISTORY_ID, payload="four five six", actor="bot", project="repo-a")
 
         self.assertEqual(updated.payload, "four five six")
         self.assertEqual(updated.actor, "bot")
-        self.assertEqual(repo.pending_embedding_ids, ["history_1"])
+        self.assertEqual(repo.pending_embedding_ids, [HISTORY_ID])
+
+    def test_append_rejects_non_uuidv7_correlation_id(self) -> None:
+        repo = FakeHistoryRepository()
+        service = HistoryService(
+            repository=repo,
+            chunking_service=DocumentChunkingService(),
+            project="workspace",
+        )
+
+        with self.assertRaises(ValueError):
+            service.append(entry_type="deploy", payload="one two three", correlation_id="not-a-uuid", project="repo-a")
 
     def test_delete_removes_history_entry(self) -> None:
         repo = FakeHistoryRepository()
@@ -241,9 +258,9 @@ class HistoryServiceTest(unittest.TestCase):
         )
 
         service.append(entry_type="deploy", payload="one two three", project="repo-a")
-        deleted = service.delete("history_1", project="repo-a")
+        deleted = service.delete(HISTORY_ID, project="repo-a")
 
-        self.assertEqual(deleted.id, "history_1")
+        self.assertEqual(deleted.id, HISTORY_ID)
         self.assertIsNone(repo.created)
         with self.assertRaises(LookupError):
-            service.get("history_1", project="repo-a")
+            service.get(HISTORY_ID, project="repo-a")

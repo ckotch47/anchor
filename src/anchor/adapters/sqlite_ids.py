@@ -23,3 +23,19 @@ def uuid7_str() -> str:
         | rand_b
     )
     return str(uuid.UUID(int=value))
+
+
+def is_uuid7_str(value: str) -> bool:
+    try:
+        parsed = uuid.UUID(value)
+    except ValueError:
+        return False
+    return parsed.version == 7 and parsed.variant == uuid.RFC_4122
+
+
+def ensure_uuid7_str(value: str, field: str = "id") -> str:
+    if not value.strip():
+        raise ValueError(f"{field} must not be empty")
+    if not is_uuid7_str(value):
+        raise ValueError(f"{field} must be a UUIDv7 value")
+    return value

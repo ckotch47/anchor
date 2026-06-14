@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from typer import Exit
 
+from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.cli import tasks_add, tasks_delete, tasks_done, tasks_list, tasks_search, tasks_update
 
 
@@ -26,7 +27,7 @@ class TasksCliTest(unittest.TestCase):
                             metatags='{"topic":"tasks"}',
                             priority=2,
                             due_at="2026-06-30T00:00:00+00:00",
-                            parent_document_id="task_parent",
+                            parent_document_id=uuid7_str(),
                         )
 
                     add_payload = json.loads(add_echo_mock.call_args.args[0])

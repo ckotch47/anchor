@@ -2,12 +2,23 @@ from __future__ import annotations
 
 import unittest
 
+from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.application.files.models import FileListItem, FileSearchHit, FilesSearchResult
 from anchor.application.history.models import HistoryListItem, HistorySearchHit, HistorySearchResult
 from anchor.application.notes.models import NoteSearchItem, NotesSearchHit, NotesSearchResult
 from anchor.application.retrieval.search_query import SearchQuery
 from anchor.application.retrieval.search_service import SearchService
 from anchor.application.tasks.models import TaskListItem, TaskSearchHit, TasksSearchResult
+
+NOTE_ID = uuid7_str()
+NOTE_CHUNK_ID = uuid7_str()
+TASK_ID = uuid7_str()
+TASK_CHUNK_ID = uuid7_str()
+FILE_ID = uuid7_str()
+FILE_CHUNK_ID = uuid7_str()
+HISTORY_ID = uuid7_str()
+HISTORY_CHUNK_ID = uuid7_str()
+HISTORY_CORRELATION_ID = uuid7_str()
 
 
 class FakeNotesService:
@@ -21,7 +32,7 @@ class FakeNotesService:
     ) -> NotesSearchResult:
         del query, limit, budget_tokens
         note = NoteSearchItem(
-            id="note_1",
+            id=NOTE_ID,
             project=project or "repo-a",
             title="Deploy note",
             pinned=False,
@@ -33,7 +44,7 @@ class FakeNotesService:
             results=[
                 NotesSearchHit(
                     note=note,
-                    chunk_id="chunk_1",
+                    chunk_id=NOTE_CHUNK_ID,
                     score=0.95,
                     snippet="deploy note snippet",
                 )
@@ -56,8 +67,8 @@ class FakeTasksService:
             count=1,
             results=[
                 TaskSearchHit(
-                    task=TaskListItem(id="task_1", title="Deploy task", status="open", priority=2),
-                    chunk_id="chunk_2",
+                    task=TaskListItem(id=TASK_ID, title="Deploy task", status="open", priority=2),
+                    chunk_id=TASK_CHUNK_ID,
                     score=0.85,
                     snippet="deploy task snippet",
                 )
@@ -81,13 +92,13 @@ class FakeFilesService:
             results=[
                 FileSearchHit(
                     file=FileListItem(
-                        id="file_1",
+                        id=FILE_ID,
                         path="/repo/deploy.py",
                         root_path="/repo",
                         language="python",
                         file_size=42,
                     ),
-                    chunk_id="chunk_3",
+                    chunk_id=FILE_CHUNK_ID,
                     score=0.75,
                     snippet="deploy file snippet",
                 )
@@ -106,11 +117,11 @@ class FakeHistoryService:
     ) -> HistorySearchResult:
         del query, limit, budget_tokens
         history = HistoryListItem(
-            id="history_1",
+            id=HISTORY_ID,
             project=project or "repo-a",
             entry_type="deploy_log",
             actor="agent",
-            correlation_id="corr-1",
+            correlation_id=HISTORY_CORRELATION_ID,
             created_at="2026-06-13T00:00:00+00:00",
         )
         return HistorySearchResult(
@@ -119,7 +130,7 @@ class FakeHistoryService:
             results=[
                 HistorySearchHit(
                     history=history,
-                    chunk_id="chunk_4",
+                    chunk_id=HISTORY_CHUNK_ID,
                     score=0.8,
                     snippet="deploy history snippet",
                 )

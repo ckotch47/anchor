@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from anchor.adapters.sqlite_ids import ensure_uuid7_str
 from anchor.adapters.sqlite_tasks_repository import SqliteTasksRepository
 from anchor.application.retrieval.document_chunking import count_tokens
 from anchor.application.tasks.models import TaskListItem, TaskRecord, TaskSearchHit, TasksListResult, TasksSearchResult
@@ -33,6 +34,10 @@ class TasksService:
     ) -> TaskRecord:
         self._require_non_empty(title, "title")
         self._require_non_empty(task_kind, "task_kind")
+        if parent_document_id is not None:
+            ensure_uuid7_str(parent_document_id, "parent_document_id")
+        if blocked_by_document_id is not None:
+            ensure_uuid7_str(blocked_by_document_id, "blocked_by_document_id")
         result = self._repository.create(
             title=title,
             body=body,
@@ -69,6 +74,10 @@ class TasksService:
             self._require_non_empty(title, "title")
         if task_kind is not None:
             self._require_non_empty(task_kind, "task_kind")
+        if parent_document_id is not None:
+            ensure_uuid7_str(parent_document_id, "parent_document_id")
+        if blocked_by_document_id is not None:
+            ensure_uuid7_str(blocked_by_document_id, "blocked_by_document_id")
         if all(
             value is None
             for value in (

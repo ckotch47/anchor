@@ -221,6 +221,7 @@ anchor notes search --query "rag plan" --limit 5 --project repo-a
 - Appends a compact working-history entry to the shared SQLite core.
 - Requires `--entry-type` and `--payload`.
 - Accepts `--actor`, `--correlation-id`, `--project`, and `--metatags`.
+- If `--correlation-id` is omitted, Anchor generates a UUIDv7 opaque id for the history entry.
 - Uses the same document spine and retrieval indexing as the other domain slices.
 
 Example:
@@ -274,6 +275,7 @@ anchor history delete --id <history-id> --project repo-a
 - Creates a task in the shared SQLite core.
 - Requires `--title`.
 - Accepts `--body`, `--priority`, `--due-at`, `--task-kind`, `--project`, `--metatags`, `--parent-id`, and `--blocked-by-id`.
+- `--parent-id` and `--blocked-by-id`, when provided, must be UUIDv7 values.
 - Stores the task through the shared document spine, not a separate tracker database.
 
 Example:

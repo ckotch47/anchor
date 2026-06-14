@@ -5,12 +5,17 @@ import unittest
 from pathlib import Path
 
 from anchor.adapters.sqlite_files_repository import SqliteFilesRepository
+from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.adapters.sqlite_migration_repository import SqliteMigrationRepository
 from anchor.application.embeddings.models import ChunkEmbeddingRecord
 from anchor.application.embeddings.service import ChunkEmbeddingsResult
 from anchor.application.files.chunking import FileChunkingService
 from anchor.application.files.models import FileListItem, FileSearchCandidate
 from anchor.application.files.service import FilesService
+
+FILE_ID = uuid7_str()
+FILE_CHUNK_ID = uuid7_str()
+FILE_EMBEDDING_CHUNK_ID = uuid7_str()
 
 
 class FilesServiceTest(unittest.TestCase):
@@ -21,13 +26,13 @@ class FilesServiceTest(unittest.TestCase):
                 return [
                     FileSearchCandidate(
                         file=FileListItem(
-                            id="file_1",
+                            id=FILE_ID,
                             path="/repo/app.py",
                             root_path="/repo",
                             language="python",
                             file_size=42,
                         ),
-                        chunk_id="chunk_1",
+                        chunk_id=FILE_CHUNK_ID,
                         snippet="lexical snippet",
                         token_count=2,
                         lexical_score=0.2,
@@ -39,13 +44,13 @@ class FilesServiceTest(unittest.TestCase):
                 return [
                     FileSearchCandidate(
                         file=FileListItem(
-                            id="file_1",
+                            id=FILE_ID,
                             path="/repo/app.py",
                             root_path="/repo",
                             language="python",
                             file_size=42,
                         ),
-                        chunk_id="chunk_1",
+                        chunk_id=FILE_CHUNK_ID,
                         snippet="vector snippet with more detail",
                         token_count=4,
                         vector_score=0.9,
@@ -57,7 +62,7 @@ class FilesServiceTest(unittest.TestCase):
                 del texts
                 return ChunkEmbeddingsResult(
                     model="fake",
-                    embeddings=[ChunkEmbeddingRecord(chunk_id="text_0", model="fake", embedding=[1.0, 0.0])],
+                    embeddings=[ChunkEmbeddingRecord(chunk_id=FILE_EMBEDDING_CHUNK_ID, model="fake", embedding=[1.0, 0.0])],
                 )
 
         class FakeRerankService:
@@ -76,7 +81,7 @@ class FilesServiceTest(unittest.TestCase):
         result = service.search("deploy", project="repo-a")
 
         self.assertEqual(result.count, 1)
-        self.assertEqual(result.results[0].file.id, "file_1")
+        self.assertEqual(result.results[0].file.id, FILE_ID)
         self.assertGreater(result.results[0].score, 0.7)
         self.assertEqual(result.results[0].snippet, "vector snippet with more detail")
 
