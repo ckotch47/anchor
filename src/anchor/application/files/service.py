@@ -145,10 +145,12 @@ class FilesService:
                 )
                 self._queue_embeddings(document_id)
                 indexed += 1
-        for record in self._repository.list_indexed_files(project=resolved_project):
-            if record.path not in seen_paths and self._root_matches(record.root_path, resolved_roots):
-                self._repository.delete(record.id, project=resolved_project)
-                deleted += 1
+        for root in resolved_roots:
+            root_path = root.as_posix()
+            for record in self._repository.list_indexed_files(project=resolved_project, root_path=root_path):
+                if record.path not in seen_paths:
+                    self._repository.delete(record.id, project=resolved_project)
+                    deleted += 1
         return FilesIndexResult(count=indexed + deleted, indexed=indexed, skipped=skipped, deleted=deleted)
 
     def list(
@@ -501,11 +503,6 @@ class FilesService:
     @staticmethod
     def _detect_language(path: Path) -> str:
         return _LANGUAGE_BY_SUFFIX.get(path.suffix.lower(), "text")
-
-    @staticmethod
-    def _root_matches(root_path: str, roots: list[Path]) -> bool:
-        resolved_root = Path(root_path).resolve()
-        return any(resolved_root == root.resolve() for root in roots)
 
     @staticmethod
     def _normalize_root(root: str | None) -> str | None:

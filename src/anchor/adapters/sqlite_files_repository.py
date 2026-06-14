@@ -247,8 +247,8 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             clauses.append("root_path = ?")
             params.append(root_path)
         if language is not None:
-            clauses.append("lower(language) = ?")
-            params.append(language.lower())
+            clauses.append("language = ?")
+            params.append(language)
         if path_prefix is not None:
             clauses.append("path LIKE ? ESCAPE '\\'")
             params.append(f"{self._escape_like(path_prefix)}%")
@@ -718,8 +718,8 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             clauses.append("AND f.root_path = ?")
             params.append(root_path)
         if language is not None:
-            clauses.append("AND lower(f.language) = ?")
-            params.append(language.lower())
+            clauses.append("AND f.language = ?")
+            params.append(language)
         if path_prefix is not None:
             clauses.append("AND f.path LIKE ? ESCAPE '\\'")
             params.append(f"{cls._escape_like(path_prefix)}%")
