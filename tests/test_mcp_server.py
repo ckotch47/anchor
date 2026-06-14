@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from anchor.mcp_server import (
+    files_delete,
     files_get,
     files_index,
     files_list,
@@ -41,6 +42,7 @@ class McpServerTest(unittest.TestCase):
         self.assertIn("tasks_add", tool_names)
         self.assertIn("files_index", tool_names)
         self.assertIn("files_get", tool_names)
+        self.assertIn("files_delete", tool_names)
         self.assertIn("files_list", tool_names)
         self.assertIn("files_search", tool_names)
 
@@ -85,6 +87,27 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(files_get_payload["meta"]["view"], "full")
         self.assertEqual(files_list_payload["meta"]["view"], "full")
         self.assertEqual(files_search_payload["meta"]["view"], "full")
+
+    def test_mcp_files_delete_removes_visibility(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            (root / "app.py").write_text("def greet():\n    return 'hello'\n", encoding="utf-8")
+
+            config_path = Path(tmpdir) / "config.toml"
+            db_path = Path(tmpdir) / "anchor.sqlite3"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=db_path):
+                    files_index(roots=[str(root)], project="repo-a")
+                    deleted_payload = files_delete(path=str((root / "app.py").resolve()), project="repo-a")
+                    list_payload = files_list(project="repo-a")
+                    search_payload = files_search(query="greet", project="repo-a")
+
+        self.assertTrue(deleted_payload["ok"])
+        self.assertEqual(deleted_payload["command"], "files.delete")
+        self.assertEqual(deleted_payload["data"]["file"]["path"], str((root / "app.py").resolve()))
+        self.assertEqual(list_payload["data"]["count"], 0)
+        self.assertEqual(search_payload["data"]["count"], 0)
 
     def test_mcp_invalid_view_returns_machine_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -195,13 +195,12 @@ class FilesService:
         resolved_root = self._normalize_root(root)
         resolved_language = self._normalize_language(language)
         resolved_path_prefix = self._normalize_path_prefix(path_prefix, resolved_root)
-        if path is not None and path.strip():
-            record = self._repository.get_by_path(
-                project=resolved_project,
-                path=self._normalize_scoped_path(path, resolved_root),
-            )
-        else:
-            record = self._repository.get(file_id or "", project=resolved_project)
+        record = self._resolve_file_record(
+            file_id=file_id,
+            path=path,
+            project=resolved_project,
+            root=resolved_root,
+        )
         if record is None:
             raise LookupError("file not found")
         if not self._file_matches_filters(
@@ -212,6 +211,40 @@ class FilesService:
         ):
             raise LookupError("file not found")
         return FilesGetResult(file=record)
+
+    def delete(
+        self,
+        file_id: str | None = None,
+        *,
+        path: str | None = None,
+        project: str | None = None,
+        root: str | None = None,
+        language: str | None = None,
+        path_prefix: str | None = None,
+    ) -> FilesGetResult:
+        resolved_project = project or self._project
+        resolved_root = self._normalize_root(root)
+        resolved_language = self._normalize_language(language)
+        resolved_path_prefix = self._normalize_path_prefix(path_prefix, resolved_root)
+        record = self._resolve_file_record(
+            file_id=file_id,
+            path=path,
+            project=resolved_project,
+            root=resolved_root,
+        )
+        if record is None:
+            raise LookupError("file not found")
+        if not self._file_matches_filters(
+            record,
+            root=resolved_root,
+            language=resolved_language,
+            path_prefix=resolved_path_prefix,
+        ):
+            raise LookupError("file not found")
+        deleted = self._repository.delete(record.id, project=resolved_project)
+        if deleted is None:
+            raise LookupError("file not found")
+        return FilesGetResult(file=deleted)
 
     def search(
         self,
@@ -503,6 +536,21 @@ class FilesService:
             return candidate.resolve().as_posix()
         base = Path(root).expanduser() if root is not None else Path.cwd()
         return (base / candidate).resolve().as_posix()
+
+    def _resolve_file_record(
+        self,
+        *,
+        file_id: str | None,
+        path: str | None,
+        project: str,
+        root: str | None,
+    ):
+        if path is not None and path.strip():
+            return self._repository.get_by_path(
+                project=project,
+                path=self._normalize_scoped_path(path, root),
+            )
+        return self._repository.get(file_id or "", project=project)
 
     @staticmethod
     def _file_matches_filters(

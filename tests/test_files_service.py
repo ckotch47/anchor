@@ -114,6 +114,56 @@ class FilesServiceTest(unittest.TestCase):
 
         self.assertEqual(result.file.path, "/repo/app.py")
 
+    def test_delete_normalizes_relative_path_against_root(self) -> None:
+        class FakeRepository:
+            def get(self, document_id: str, *, project: str):
+                del document_id, project
+                return None
+
+            def get_by_path(self, *, project: str, path: str):
+                del project
+                if path != "/repo/app.py":
+                    return None
+                return IndexedFileRecord(
+                    id=FILE_ID,
+                    project="repo-a",
+                    metatags={},
+                    path="/repo/app.py",
+                    root_path="/repo",
+                    language="python",
+                    file_size=42,
+                    content_hash="hash",
+                    mtime_ns=1,
+                    created_at="2026-06-13T00:00:00+00:00",
+                    updated_at="2026-06-13T00:00:00+00:00",
+                    deleted_at=None,
+                )
+
+            def delete(self, document_id: str, *, project: str):
+                del project
+                if document_id != FILE_ID:
+                    return None
+                return IndexedFileRecord(
+                    id=FILE_ID,
+                    project="repo-a",
+                    metatags={},
+                    path="/repo/app.py",
+                    root_path="/repo",
+                    language="python",
+                    file_size=42,
+                    content_hash="hash",
+                    mtime_ns=1,
+                    created_at="2026-06-13T00:00:00+00:00",
+                    updated_at="2026-06-13T00:00:00+00:00",
+                    deleted_at="2026-06-13T00:00:00+00:00",
+                )
+
+        service = FilesService(repository=FakeRepository(), chunking_service=FileChunkingService(), project="repo-a")
+
+        result = service.delete(path="app.py", root="/repo", project="repo-a")
+
+        self.assertEqual(result.file.path, "/repo/app.py")
+
     def test_list_returns_compact_file_items(self) -> None:
         class FakeRepository:
             def list_indexed_files(self, *, project: str, root_path: str | None = None, language: str | None = None, path_prefix: str | None = None, limit: int | None = None):

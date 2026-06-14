@@ -355,6 +355,18 @@ Example:
 anchor files get --path ./repo/app.py --project repo-a
 ```
 
+### `anchor files delete`
+
+- Soft-deletes one indexed file by `--id` or `--path`.
+- Uses the same scoping rules as `files get`, including `--project`, `--root`, `--language`, and `--path-prefix`.
+- Removes the file from future list/search/get visibility and clears its retrieval chunks.
+
+Example:
+
+```bash
+anchor files delete --path ./repo/app.py --project repo-a
+```
+
 ### `anchor files list`
 
 - Returns indexed files for the selected project.
@@ -456,6 +468,7 @@ anchor tasks delete --id <task-id> --project repo-a
 - `anchor tasks done`
 - `anchor files index`
 - `anchor files get`
+- `anchor files delete`
 - `anchor files list`
 - `anchor files search`
 - `anchor mcp`

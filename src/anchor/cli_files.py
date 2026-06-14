@@ -83,6 +83,47 @@ def files_get(
         emit_error("files", "DB_MIGRATION_FAILED", str(exc))
 
 
+@files_app.command(name="delete")
+def files_delete(
+    file_id: Annotated[str | None, typer.Option("--id")] = None,
+    path: Annotated[str | None, typer.Option("--path")] = None,
+    root: Annotated[str | None, typer.Option("--root")] = None,
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    path_prefix: Annotated[str | None, typer.Option("--path-prefix")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+) -> None:
+    try:
+        container = build_container(profile=profile)
+        resolved_project = resolve_project(container, project)
+        result = container.files_service.delete(
+            file_id=file_id,
+            path=path,
+            root=root,
+            language=language,
+            path_prefix=path_prefix,
+            project=resolved_project,
+        )
+        typer.echo(
+            json.dumps(
+                build_success_payload(
+                    "files.delete",
+                    {"file": result.file.model_dump()},
+                    container,
+                    extra_meta={"project": resolved_project},
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    except LookupError as exc:
+        emit_error("files", "NOT_FOUND", str(exc))
+    except ValueError as exc:
+        emit_error("files", "INVALID_ARGS", str(exc))
+    except Exception as exc:
+        emit_error("files", "DB_MIGRATION_FAILED", str(exc))
+
+
 @files_app.command(name="list")
 def files_list(
     limit: Annotated[int, typer.Option("--limit")] = 20,

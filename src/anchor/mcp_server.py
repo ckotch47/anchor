@@ -478,6 +478,34 @@ def files_get(
     return _success("files.get", {"file": result.file.model_dump()}, container, project=resolved_project, extra_meta={"view": resolved_view})
 
 
+@mcp_app.tool(name="files_delete", description="Delete one indexed file by id or path")
+def files_delete(
+    file_id: str | None = None,
+    path: str | None = None,
+    root: str | None = None,
+    language: str | None = None,
+    path_prefix: str | None = None,
+    project: str | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    resolved_project = resolve_project(container, project)
+    try:
+        result: FilesGetResult = container.files_service.delete(
+            file_id=file_id,
+            path=path,
+            root=root,
+            language=language,
+            path_prefix=path_prefix,
+            project=resolved_project,
+        )
+    except LookupError as exc:
+        return _error("files.delete", "NOT_FOUND", str(exc))
+    except ValueError as exc:
+        return _error("files.delete", "INVALID_ARGS", str(exc))
+    return _success("files.delete", {"file": result.file.model_dump()}, container, project=resolved_project)
+
+
 @mcp_app.tool(name="files_list", description="List indexed files in the current project")
 def files_list(
     limit: int = 20,
