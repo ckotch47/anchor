@@ -15,6 +15,9 @@ anchor <domain> <action> [flags]
 - `--view compact|full` управляет глубиной ответа
 - `--project` задаёт явную область
 - `--limit` управляет пагинацией
+- `--projects` включает cross-project search только явно
+- `--correlation-id` можно задавать для связывания действий
+- `--metatags` и другие структурные поля должны быть типизированы
 
 ## Формат ответа
 
@@ -52,6 +55,7 @@ anchor <domain> <action> [flags]
 - `files list` опирается на UUIDv7 `document_id`
 - cross-entity `search` использует opaque cursor на основе `score + entity_type + entity_id`
 - cross-project search включается только явно через `--projects`
+- list-команды не должны возвращать полный объект по умолчанию
 
 ## Поиск
 
@@ -60,9 +64,11 @@ anchor <domain> <action> [flags]
 - `--view full` расширяет доменный объект, если это поддержано
 - поиск всегда project-scoped
 - при отсутствии vector-слоя поиск должен деградировать в lexical-only
+- compact view должен убирать лишние поля, а не только визуально сокращать вывод
 
 ## Перекрытие конфигом
 
 - flags имеют приоритет над config
 - config задаёт дефолты
 - явный ввод важнее скрытой магии
+- config хранится в пользовательской папке
