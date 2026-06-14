@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,6 +38,7 @@ class NotesCliTest(unittest.TestCase):
         self.assertEqual(add_payload["data"]["note"]["title"], "First note")
         self.assertEqual(add_payload["data"]["note"]["project"], "workspace")
         self.assertTrue(add_payload["data"]["note"]["pinned"])
+        self.assertEqual(uuid.UUID(note_id).version, 7)
         self.assertTrue(list_payload["ok"])
         self.assertEqual(list_payload["command"], "notes.list")
         self.assertEqual(list_payload["data"]["count"], 1)

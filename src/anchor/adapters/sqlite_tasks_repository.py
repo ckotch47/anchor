@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
 from pathlib import Path
 
+from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.adapters.sqlite_repository import SqliteRepositoryBase
 from anchor.adapters.sqlite_support import utc_now_iso
 from anchor.application.retrieval.search_query import normalize_fts5_query
@@ -31,7 +31,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         parent_document_id: str | None = None,
         blocked_by_document_id: str | None = None,
     ) -> TaskRecord:
-        task_id = f"task_{uuid.uuid4().hex}"
+        task_id = uuid7_str()
         now = utc_now_iso()
         serialized_metatags = self._serialize_metatags(metatags or {})
         body_value = body.strip() or title
@@ -257,7 +257,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
             return None
         now = utc_now_iso()
         started_at = current.started_at or now
-        with self._connect() as connection:
+        with self._write_connect() as connection:
             connection.execute(
                 """
                 UPDATE documents
@@ -288,7 +288,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         if current is None:
             return None
         now = utc_now_iso()
-        with self._connect() as connection:
+        with self._write_connect() as connection:
             connection.execute(
                 """
                 UPDATE documents
@@ -317,7 +317,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
     def search(self, query: str, limit: int, *, project: str) -> list[TaskSearchHit]:
         match_query = normalize_fts5_query(query)
         self._backfill_missing_task_chunks(project=project)
-        with self._connect() as connection:
+        with self._write_connect() as connection:
             rows = connection.execute(
                 """
                 SELECT
@@ -411,7 +411,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         metatags: str,
         created_at: str,
     ) -> None:
-        chunk_id = f"chunk_{uuid.uuid4().hex}"
+        chunk_id = uuid7_str()
         chunk_text = f"{title}\n{body}".strip()
         connection.execute(
             """
@@ -439,7 +439,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         )
 
     def _backfill_missing_task_chunks(self, *, project: str) -> None:
-        with self._connect() as connection:
+        with self._write_connect() as connection:
             rows = connection.execute(
                 """
                 SELECT

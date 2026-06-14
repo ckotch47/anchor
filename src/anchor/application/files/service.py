@@ -7,6 +7,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from anchor.adapters.sqlite_files_repository import SqliteFilesRepository
+from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.files.chunking import FileChunkingService
 from anchor.application.files.models import FileSearchCandidate, FileSearchHit, FilesIndexResult, FilesSearchResult
@@ -121,7 +122,7 @@ class FilesService:
                     chunk_size=self._chunk_size,
                     chunk_overlap=self._chunk_overlap,
                 )
-                document_id = self._document_id(resolved_project, relative_path)
+                document_id = existing.id if existing is not None else uuid7_str()
                 self._repository.upsert_file(
                     document_id=document_id,
                     project=resolved_project,
@@ -183,11 +184,6 @@ class FilesService:
     def _require_non_empty(value: str, field: str) -> None:
         if not value.strip():
             raise ValueError(f"{field} must not be empty")
-
-    @staticmethod
-    def _document_id(project: str, path: str) -> str:
-        digest = hashlib.sha256(f"{project}:{path}".encode()).hexdigest()
-        return f"file_{digest}"
 
     def _queue_embeddings(self, document_id: str) -> None:
         if self._embedding_service is None or not hasattr(self._repository, "enqueue_embedding_index"):

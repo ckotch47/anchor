@@ -151,7 +151,7 @@ anchor notes add --title "RAG plan" --body "Use SQLite FTS + vector + rerank" --
 Example:
 
 ```bash
-anchor notes update --id note_123 --title "RAG plan v2" --project repo-a
+anchor notes update --id <note-id> --title "RAG plan v2" --project repo-a
 ```
 
 ### `anchor notes delete`
@@ -164,7 +164,7 @@ anchor notes update --id note_123 --title "RAG plan v2" --project repo-a
 Example:
 
 ```bash
-anchor notes delete --id note_123 --project repo-a
+anchor notes delete --id <note-id> --project repo-a
 ```
 
 ### `anchor notes list`
@@ -190,7 +190,7 @@ anchor notes list --limit 5 --project repo-a
 Example:
 
 ```bash
-anchor notes get --id note_123 --project repo-a
+anchor notes get --id <note-id> --project repo-a
 ```
 
 ### `anchor notes search`
@@ -253,7 +253,7 @@ anchor history search --query "deploy" --project repo-a
 Example:
 
 ```bash
-anchor history update --id history_123 --payload "Deploy step updated" --project repo-a
+anchor history update --id <history-id> --payload "Deploy step updated" --project repo-a
 ```
 
 ### `anchor history delete`
@@ -266,7 +266,7 @@ anchor history update --id history_123 --payload "Deploy step updated" --project
 Example:
 
 ```bash
-anchor history delete --id history_123 --project repo-a
+anchor history delete --id <history-id> --project repo-a
 ```
 
 ### `anchor tasks add`
@@ -317,6 +317,7 @@ anchor search --query "deploy" --types notes,tasks,files --limit 5 --project rep
 - Starts the same core use-cases over MCP `stdio`.
 - Exposes typed tools for health, config, notes, tasks, files, and cross-entity search.
 - Uses the same SQLite container and service layer as the CLI.
+- Mirrors the CLI `--view compact|full` contract on list and search tools so MCP agents can choose token-light or expanded payloads without a transport-specific shape.
 
 Example:
 
@@ -363,7 +364,7 @@ anchor files search --query "greet" --project repo-a
 Example:
 
 ```bash
-anchor tasks update --id task_123 --priority 5 --project repo-a
+anchor tasks update --id <task-id> --priority 5 --project repo-a
 ```
 
 ### `anchor tasks list`
@@ -390,7 +391,7 @@ anchor tasks list --limit 5 --project repo-a
 Example:
 
 ```bash
-anchor tasks done --id task_123 --project repo-a
+anchor tasks done --id <task-id> --project repo-a
 ```
 
 ### `anchor tasks delete`
@@ -403,7 +404,7 @@ anchor tasks done --id task_123 --project repo-a
 Example:
 
 ```bash
-anchor tasks delete --id task_123 --project repo-a
+anchor tasks delete --id <task-id> --project repo-a
 ```
 
 ## Target command set

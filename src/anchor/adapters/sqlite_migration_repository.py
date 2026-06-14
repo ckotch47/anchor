@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from anchor.adapters.sqlite_support import configure_connection, utc_now_iso
+from anchor.adapters.sqlite_support import configure_connection, sqlite_write_lock, utc_now_iso
 from anchor.config import default_database_path
 
 
@@ -330,31 +330,32 @@ class SqliteMigrationRepository:
 
     def apply_pending(self) -> MigrationApplicationResult:
         self._database_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self._database_path)
-        try:
-            self._configure(connection)
-            self._ensure_migrations_table(connection)
-            applied_versions = self._applied_versions(connection)
-            applied = 0
-            for migration in MIGRATIONS:
-                if migration.version in applied_versions:
-                    continue
-                connection.executescript(migration.sql)
-                self._record_migration(connection, migration)
-                applied += 1
-                applied_versions.append(migration.version)
-            connection.commit()
-            return MigrationApplicationResult(
-                database_path=self._database_path,
-                applied=applied,
-                current_version=max(applied_versions, default=0),
-                applied_versions=sorted(applied_versions),
-            )
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+        with sqlite_write_lock(self._database_path):
+            connection = sqlite3.connect(self._database_path)
+            try:
+                self._configure(connection)
+                self._ensure_migrations_table(connection)
+                applied_versions = self._applied_versions(connection)
+                applied = 0
+                for migration in MIGRATIONS:
+                    if migration.version in applied_versions:
+                        continue
+                    connection.executescript(migration.sql)
+                    self._record_migration(connection, migration)
+                    applied += 1
+                    applied_versions.append(migration.version)
+                connection.commit()
+                return MigrationApplicationResult(
+                    database_path=self._database_path,
+                    applied=applied,
+                    current_version=max(applied_versions, default=0),
+                    applied_versions=sorted(applied_versions),
+                )
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
 
     def _configure(self, connection: sqlite3.Connection) -> None:
         configure_connection(connection, busy_timeout_ms=250)

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
 from pathlib import Path
 
+from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.adapters.sqlite_repository import SqliteRepositoryBase
 from anchor.adapters.sqlite_support import utc_now_iso
 from anchor.adapters.sqlite_vector_support import (
@@ -36,7 +36,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
         metatags: dict[str, object] | None = None,
         chunks: list[DocumentChunkDraft] | None = None,
     ) -> HistoryRecord:
-        document_id = f"history_{uuid.uuid4().hex}"
+        document_id = uuid7_str()
         now = utc_now_iso()
         serialized_metatags = self._serialize_metatags(metatags or {})
         body_value = payload.strip()
@@ -214,7 +214,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
         metatags: str,
         created_at: str,
     ) -> None:
-        with self._connect() as connection:
+        with self._write_connect() as connection:
             use_vector_encoding = try_load_sqlite_vector_extension(connection)
             embedding_sql = "vector_as_f32(?)" if use_vector_encoding else "?"
             for record in embeddings:
@@ -235,7 +235,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
             connection.commit()
 
     def enqueue_embedding_index(self, document_id: str) -> None:
-        with self._connect() as connection:
+        with self._write_connect() as connection:
             connection.execute(
                 """
                 INSERT INTO index_states (
@@ -253,7 +253,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
             connection.commit()
 
     def pending_embedding_documents(self, *, project: str, limit: int = 8) -> list[str]:
-        with self._connect() as connection:
+        with self._write_connect() as connection:
             rows = connection.execute(
                 """
                 SELECT entity_id
@@ -274,7 +274,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
         return [str(row["entity_id"]) for row in rows]
 
     def mark_embedding_index_ready(self, document_id: str) -> None:
-        with self._connect() as connection:
+        with self._write_connect() as connection:
             connection.execute(
                 """
                 INSERT INTO index_states (
@@ -293,7 +293,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
             connection.commit()
 
     def mark_embedding_index_error(self, document_id: str, *, last_error: str) -> None:
-        with self._connect() as connection:
+        with self._write_connect() as connection:
             connection.execute(
                 """
                 INSERT INTO index_states (
@@ -527,7 +527,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
         created_at: str,
     ) -> None:
         for chunk_index, chunk in enumerate(chunks):
-            chunk_id = f"chunk_{uuid.uuid4().hex}"
+            chunk_id = uuid7_str()
             connection.execute(
                 """
                 INSERT INTO document_chunks (

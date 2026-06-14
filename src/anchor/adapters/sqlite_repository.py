@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from anchor.adapters.sqlite_support import configure_connection
+from anchor.adapters.sqlite_support import configure_connection, sqlite_write_lock
 from anchor.adapters.sqlite_vector_support import initialize_chunk_embeddings_vector, try_load_sqlite_vector_extension
 from anchor.config import default_database_path
 
@@ -27,3 +27,9 @@ class SqliteRepositoryBase:
             yield connection
         finally:
             connection.close()
+
+    @contextmanager
+    def _write_connect(self) -> Iterator[sqlite3.Connection]:
+        with sqlite_write_lock(self._database_path):
+            with self._connect() as connection:
+                yield connection

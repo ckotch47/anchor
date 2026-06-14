@@ -6,7 +6,7 @@ from mcp.server.fastmcp import FastMCP
 
 from anchor.application.history.models import HistorySearchResult
 from anchor.application.retrieval.search_query import SearchQuery
-from anchor.cli_shared import build_success_payload, config_payload, resolve_project
+from anchor.cli_shared import build_success_payload, config_payload, resolve_project, resolve_view
 from anchor.container import build_container
 
 mcp_app = FastMCP(name="anchor", instructions="Local CLI tool for agents")
@@ -18,6 +18,18 @@ def _container(profile: str | None = None):
 
 def _success(command: str, data: dict[str, Any], container: Any, *, project: str | None = None, extra_meta: dict[str, Any] | None = None) -> dict[str, Any]:
     return build_success_payload(command, data, container, extra_meta={"project": project or container.config.runtime.default_project, **(extra_meta or {})})
+
+
+def _error(command: str, code: str, message: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "command": command,
+        "error": {
+            "code": code,
+            "message": message,
+            "retryable": False,
+        },
+    }
 
 
 @mcp_app.tool(name="health", description="Read the local runtime and database health")
@@ -142,15 +154,25 @@ def notes_update(
 
 
 @mcp_app.tool(name="notes_list", description="List notes in the current project")
-def notes_list(limit: int = 20, project: str | None = None, profile: str | None = None) -> dict[str, Any]:
+def notes_list(
+    limit: int = 20,
+    project: str | None = None,
+    view: str | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result = container.notes_service.list(limit=limit, project=resolved_project)
+    try:
+        resolved_view = resolve_view(container, view)
+    except ValueError as exc:
+        return _error("notes.list", "INVALID_ARGS", str(exc))
+    result = container.notes_service.list(limit=limit, project=resolved_project, view=resolved_view)
     return _success(
         "notes.list",
         {"count": result.count, "notes": [note.model_dump() for note in result.notes]},
         container,
         project=resolved_project,
+        extra_meta={"view": resolved_view},
     )
 
 
@@ -175,16 +197,22 @@ def notes_search(
     query: str,
     limit: int = 20,
     project: str | None = None,
+    view: str | None = None,
     profile: str | None = None,
 ) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result = container.notes_service.search(query=query, limit=limit, project=resolved_project)
+    try:
+        resolved_view = resolve_view(container, view)
+    except ValueError as exc:
+        return _error("notes.search", "INVALID_ARGS", str(exc))
+    result = container.notes_service.search(query=query, limit=limit, project=resolved_project, view=resolved_view)
     return _success(
         "notes.search",
         {"query": result.query, "count": result.count, "results": [hit.model_dump() for hit in result.results]},
         container,
         project=resolved_project,
+        extra_meta={"view": resolved_view},
     )
 
 
@@ -241,16 +269,27 @@ def history_search(
     query: str,
     limit: int = 20,
     project: str | None = None,
+    view: str | None = None,
     profile: str | None = None,
 ) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result: HistorySearchResult = container.history_service.search(query=query, limit=limit, project=resolved_project)
+    try:
+        resolved_view = resolve_view(container, view)
+    except ValueError as exc:
+        return _error("history.search", "INVALID_ARGS", str(exc))
+    result: HistorySearchResult = container.history_service.search(
+        query=query,
+        limit=limit,
+        project=resolved_project,
+        view=resolved_view,
+    )
     return _success(
         "history.search",
         {"query": result.query, "count": result.count, "results": [hit.model_dump() for hit in result.results]},
         container,
         project=resolved_project,
+        extra_meta={"view": resolved_view},
     )
 
 
@@ -331,15 +370,25 @@ def tasks_update(
 
 
 @mcp_app.tool(name="tasks_list", description="List tasks in the current project")
-def tasks_list(limit: int = 20, project: str | None = None, profile: str | None = None) -> dict[str, Any]:
+def tasks_list(
+    limit: int = 20,
+    project: str | None = None,
+    view: str | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result = container.tasks_service.list(limit=limit, project=resolved_project)
+    try:
+        resolved_view = resolve_view(container, view)
+    except ValueError as exc:
+        return _error("tasks.list", "INVALID_ARGS", str(exc))
+    result = container.tasks_service.list(limit=limit, project=resolved_project, view=resolved_view)
     return _success(
         "tasks.list",
         {"count": result.count, "tasks": [task.model_dump() for task in result.tasks]},
         container,
         project=resolved_project,
+        extra_meta={"view": resolved_view},
     )
 
 
@@ -348,16 +397,22 @@ def tasks_search(
     query: str,
     limit: int = 20,
     project: str | None = None,
+    view: str | None = None,
     profile: str | None = None,
 ) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result = container.tasks_service.search(query=query, limit=limit, project=resolved_project)
+    try:
+        resolved_view = resolve_view(container, view)
+    except ValueError as exc:
+        return _error("tasks.search", "INVALID_ARGS", str(exc))
+    result = container.tasks_service.search(query=query, limit=limit, project=resolved_project, view=resolved_view)
     return _success(
         "tasks.search",
         {"query": result.query, "count": result.count, "results": [hit.model_dump() for hit in result.results]},
         container,
         project=resolved_project,
+        extra_meta={"view": resolved_view},
     )
 
 
@@ -394,16 +449,22 @@ def files_search(
     query: str,
     limit: int = 20,
     project: str | None = None,
+    view: str | None = None,
     profile: str | None = None,
 ) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result = container.files_service.search(query=query, limit=limit, project=resolved_project)
+    try:
+        resolved_view = resolve_view(container, view)
+    except ValueError as exc:
+        return _error("files.search", "INVALID_ARGS", str(exc))
+    result = container.files_service.search(query=query, limit=limit, project=resolved_project, view=resolved_view)
     return _success(
         "files.search",
         {"query": result.query, "count": result.count, "results": [hit.model_dump() for hit in result.results]},
         container,
         project=resolved_project,
+        extra_meta={"view": resolved_view},
     )
 
 
@@ -414,31 +475,36 @@ def search(
     limit: int = 20,
     budget_tokens: int | None = None,
     project: str | None = None,
+    view: str | None = None,
     explain: bool = False,
     profile: str | None = None,
     weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    search_query = SearchQuery(
-        query=query,
-        types=types or ["notes", "tasks", "history", "files"],
-        project=resolved_project,
-        limit=limit,
-        budget_tokens=budget_tokens if budget_tokens is not None else container.config.runtime.default_budget_tokens,
-        explain=explain,
-        weights=weights or {},
-    )
-    result = container.search_service.search(search_query)
-    data = result.model_dump(exclude_none=True)
-    if not explain and isinstance(data, dict):
-        data.pop("stats", None)
-    return build_success_payload(
-        "search",
-        data,
-        container,
-        extra_meta={"project": resolved_project, "types": search_query.types, "explain": explain},
-    )
+    try:
+        search_query = SearchQuery(
+            query=query,
+            types=types or ["notes", "tasks", "history", "files"],
+            project=resolved_project,
+            limit=limit,
+            budget_tokens=budget_tokens if budget_tokens is not None else container.config.runtime.default_budget_tokens,
+            explain=explain,
+            weights=weights or {},
+        )
+        result = container.search_service.search(search_query)
+        data = result.model_dump(exclude_none=True)
+        if not explain and isinstance(data, dict):
+            data.pop("stats", None)
+        return build_success_payload(
+            "search",
+            data,
+            container,
+            view=view,
+            extra_meta={"project": resolved_project, "types": search_query.types, "explain": explain},
+        )
+    except ValueError as exc:
+        return _error("search", "INVALID_ARGS", str(exc))
 
 
 def run_stdio() -> None:
