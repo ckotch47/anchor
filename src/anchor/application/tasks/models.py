@@ -34,7 +34,7 @@ class TaskListItem(BaseModel):
 
 
 class TaskSearchHit(BaseModel):
-    task: TaskListItem
+    task: TaskRecord | TaskListItem
     chunk_id: str
     score: float
     snippet: str
@@ -42,7 +42,7 @@ class TaskSearchHit(BaseModel):
 
 class TasksListResult(BaseModel):
     count: int
-    tasks: list[TaskListItem]
+    tasks: list[TaskRecord | TaskListItem]
 
 
 class TasksSearchResult(BaseModel):

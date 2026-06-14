@@ -28,7 +28,7 @@ class HistoryCliTest(unittest.TestCase):
                     history_id = append_payload["data"]["history"]["id"]
 
                     with patch("typer.echo") as search_echo_mock:
-                        history_search(query="Deploy", project="repo-a")
+                        history_search(query="Deploy", project="repo-a", view="full")
 
         search_payload = json.loads(search_echo_mock.call_args.args[0])
         self.assertTrue(append_payload["ok"])
@@ -41,6 +41,7 @@ class HistoryCliTest(unittest.TestCase):
         self.assertEqual(search_payload["data"]["count"], 1)
         self.assertEqual(search_payload["data"]["results"][0]["history"]["id"], history_id)
         self.assertEqual(search_payload["meta"]["project"], "repo-a")
+        self.assertIn("payload", search_payload["data"]["results"][0]["history"])
 
     def test_history_update_and_delete_emit_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

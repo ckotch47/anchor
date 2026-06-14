@@ -43,7 +43,7 @@ class NotesCliTest(unittest.TestCase):
         self.assertEqual(list_payload["meta"]["view"], "full")
         self.assertEqual(list_payload["data"]["notes"][0]["id"], note_id)
         self.assertEqual(list_payload["data"]["notes"][0]["project"], "workspace")
-        self.assertNotIn("body", list_payload["data"]["notes"][0])
+        self.assertIn("body", list_payload["data"]["notes"][0])
         self.assertTrue(get_payload["ok"])
         self.assertEqual(get_payload["command"], "notes.get")
         self.assertEqual(get_payload["data"]["note"]["id"], note_id)
@@ -106,6 +106,7 @@ class NotesCliTest(unittest.TestCase):
         self.assertEqual(get_payload["data"]["note"]["project"], "repo-a")
         self.assertEqual(search_payload["meta"]["project"], "repo-a")
         self.assertEqual(search_payload["meta"]["view"], "full")
+        self.assertIn("body", search_payload["data"]["results"][0]["note"])
 
     def test_notes_add_empty_payload_emits_machine_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -151,6 +152,20 @@ class NotesCliTest(unittest.TestCase):
                     with patch("typer.echo") as echo_mock:
                         with self.assertRaises(Exit):
                             notes_search(query=" ", limit=10)
+
+        payload = json.loads(echo_mock.call_args.args[0])
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"], "notes")
+        self.assertEqual(payload["error"]["code"], "INVALID_ARGS")
+
+    def test_notes_list_rejects_invalid_view(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=Path(tmpdir) / "anchor.sqlite3"):
+                    with patch("typer.echo") as echo_mock:
+                        with self.assertRaises(Exit):
+                            notes_list(view="bad")
 
         payload = json.loads(echo_mock.call_args.args[0])
         self.assertFalse(payload["ok"])

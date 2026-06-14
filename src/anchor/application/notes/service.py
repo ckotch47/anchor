@@ -106,16 +106,13 @@ class NotesService:
             self._queue_embeddings(result.id)
         return result
 
-    def list(self, limit: int = 20, *, project: str | None = None) -> NotesListResult:
+    def list(self, limit: int = 20, *, project: str | None = None, view: str = "compact") -> NotesListResult:
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
         notes = self._repository.list(limit, project=project or self._project)
         return NotesListResult(
             count=len(notes),
-            notes=[
-                compact_note_list_item(note)
-                for note in notes
-            ],
+            notes=notes if view == "full" else [compact_note_list_item(note) for note in notes],
         )
 
     def get(self, note_id: str, *, project: str | None = None) -> NoteRecord:
@@ -139,6 +136,7 @@ class NotesService:
         *,
         project: str | None = None,
         budget_tokens: int | None = None,
+        view: str = "compact",
     ) -> NotesSearchResult:
         self._require_non_empty(query, "query")
         if limit <= 0:
@@ -155,7 +153,7 @@ class NotesService:
         )
         results = [
             NotesSearchHit(
-                note=candidate.note,
+                note=self.get(candidate.note.id, project=resolved_project) if view == "full" else candidate.note,
                 chunk_id=candidate.chunk_id,
                 score=combine_search_scores(
                     lexical_score=candidate.lexical_score,

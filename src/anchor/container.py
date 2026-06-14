@@ -64,7 +64,7 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
             )
         )
     notes_service = NotesService(
-        repository=SqliteNotesRepository(database_path=database_path),
+        repository=SqliteNotesRepository(database_path=database_path, vector_dimension=config.vector.dimension),
         chunking_service=DocumentChunkingService(),
         project=config.runtime.default_project,
         embedding_service=embedding_service,
@@ -72,7 +72,7 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         budget_tokens=config.runtime.default_budget_tokens,
     )
     history_service = HistoryService(
-        repository=SqliteHistoryRepository(database_path=database_path),
+        repository=SqliteHistoryRepository(database_path=database_path, vector_dimension=config.vector.dimension),
         chunking_service=DocumentChunkingService(),
         project=config.runtime.default_project,
         embedding_service=embedding_service,
@@ -85,7 +85,7 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         budget_tokens=config.runtime.default_budget_tokens,
     )
     files_service = FilesService(
-        repository=SqliteFilesRepository(database_path=database_path),
+        repository=SqliteFilesRepository(database_path=database_path, vector_dimension=config.vector.dimension),
         chunking_service=FileChunkingService(),
         project=config.runtime.default_project,
         embedding_service=embedding_service,

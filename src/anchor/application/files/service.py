@@ -149,6 +149,7 @@ class FilesService:
         *,
         project: str | None = None,
         budget_tokens: int | None = None,
+        view: str = "compact",
     ) -> FilesSearchResult:
         self._require_non_empty(query, "query")
         if limit <= 0:
@@ -165,7 +166,7 @@ class FilesService:
         )
         results = [
             FileSearchHit(
-                file=candidate.file,
+                file=self._repository.get(candidate.file.id, project=resolved_project) if view == "full" else candidate.file,
                 chunk_id=candidate.chunk_id,
                 score=combine_search_scores(
                     lexical_score=candidate.lexical_score,

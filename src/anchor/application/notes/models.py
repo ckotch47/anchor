@@ -37,7 +37,7 @@ class NoteSearchItem(BaseModel):
 
 
 class NotesSearchHit(BaseModel):
-    note: NoteSearchItem
+    note: NoteRecord | NoteSearchItem
     chunk_id: str
     score: float
     snippet: str
@@ -55,7 +55,7 @@ class NotesSearchCandidate(BaseModel):
 
 class NotesListResult(BaseModel):
     count: int
-    notes: list[NoteListItem]
+    notes: list[NoteRecord | NoteListItem]
 
 
 class NotesSearchResult(BaseModel):

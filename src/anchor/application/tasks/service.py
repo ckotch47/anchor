@@ -104,13 +104,16 @@ class TasksService:
             raise LookupError(f"task not found: {task_id}")
         return result
 
-    def list(self, limit: int = 20, *, project: str | None = None) -> TasksListResult:
+    def list(self, limit: int = 20, *, project: str | None = None, view: str = "compact") -> TasksListResult:
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
-        tasks = self._repository.list(limit, project=project or self._project)
+        try:
+            tasks = self._repository.list(limit, project=project or self._project, full=view == "full")
+        except TypeError:
+            tasks = self._repository.list(limit, project=project or self._project)
         return TasksListResult(
             count=len(tasks),
-            tasks=[
+            tasks=tasks if view == "full" else [
                 TaskListItem(
                     id=task.id,
                     title=task.title,
@@ -128,6 +131,7 @@ class TasksService:
         *,
         project: str | None = None,
         budget_tokens: int | None = None,
+        view: str = "compact",
     ) -> TasksSearchResult:
         self._require_non_empty(query, "query")
         if limit <= 0:
@@ -136,6 +140,16 @@ class TasksService:
             self._repository.search(query=query, limit=limit, project=project or self._project),
             budget_tokens if budget_tokens is not None else self._budget_tokens,
         )
+        if view == "full":
+            results = [
+                TaskSearchHit(
+                    task=self._repository.get(result.task.id, project=project or self._project) or result.task,
+                    chunk_id=result.chunk_id,
+                    score=result.score,
+                    snippet=result.snippet,
+                )
+                for result in results
+            ]
         return TasksSearchResult(query=query, count=len(results), results=results)
 
     def done(self, task_id: str, *, project: str | None = None) -> TaskRecord:

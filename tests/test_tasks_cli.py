@@ -33,7 +33,7 @@ class TasksCliTest(unittest.TestCase):
                     task_id = add_payload["data"]["task"]["id"]
 
                     with patch("typer.echo") as list_echo_mock:
-                        tasks_list(project="repo-a")
+                        tasks_list(project="repo-a", view="full")
 
                     list_payload = json.loads(list_echo_mock.call_args.args[0])
                     with patch("typer.echo") as done_echo_mock:
@@ -49,6 +49,7 @@ class TasksCliTest(unittest.TestCase):
         self.assertEqual(list_payload["data"]["tasks"][0]["title"], "Ship tasks slice")
         self.assertEqual(list_payload["data"]["tasks"][0]["status"], "open")
         self.assertEqual(list_payload["data"]["tasks"][0]["priority"], 2)
+        self.assertIn("body", list_payload["data"]["tasks"][0])
         self.assertEqual(done_payload["command"], "tasks.done")
         self.assertEqual(done_payload["data"]["task"]["status"], "done")
 
@@ -88,7 +89,7 @@ class TasksCliTest(unittest.TestCase):
                         tasks_add(title="Deploy tasks", body="Add deploy search", project="repo-a")
 
                     with patch("typer.echo") as search_echo_mock:
-                        tasks_search(query="deploy", project="repo-a")
+                        tasks_search(query="deploy", project="repo-a", view="full")
 
         search_payload = json.loads(search_echo_mock.call_args.args[0])
         self.assertTrue(search_payload["ok"])
@@ -96,6 +97,7 @@ class TasksCliTest(unittest.TestCase):
         self.assertEqual(search_payload["data"]["count"], 1)
         self.assertEqual(search_payload["data"]["results"][0]["task"]["title"], "Deploy tasks")
         self.assertIn("snippet", search_payload["data"]["results"][0])
+        self.assertIn("body", search_payload["data"]["results"][0]["task"])
 
     def test_tasks_add_rejects_empty_title(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

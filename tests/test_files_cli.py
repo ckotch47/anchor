@@ -23,7 +23,7 @@ class FilesCliTest(unittest.TestCase):
                     with patch("typer.echo") as index_echo_mock:
                         files_index(root=[str(root)], project="repo-a")
                     with patch("typer.echo") as search_echo_mock:
-                        files_search(query="greet", project="repo-a")
+                        files_search(query="greet", project="repo-a", view="full")
 
         index_payload = json.loads(index_echo_mock.call_args.args[0])
         search_payload = json.loads(search_echo_mock.call_args.args[0])
@@ -34,3 +34,4 @@ class FilesCliTest(unittest.TestCase):
         self.assertEqual(search_payload["command"], "files.search")
         self.assertEqual(search_payload["data"]["count"], 1)
         self.assertEqual(search_payload["data"]["results"][0]["file"]["path"], str((root / "app.py").resolve()))
+        self.assertIn("content_hash", search_payload["data"]["results"][0]["file"])

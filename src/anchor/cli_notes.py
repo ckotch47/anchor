@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from anchor.application.notes.models import NotesListResult
-from anchor.cli_shared import build_success_payload, emit_error, parse_metatags, resolve_project
+from anchor.cli_shared import build_success_payload, emit_error, parse_metatags, resolve_project, resolve_view
 from anchor.container import build_container
 
 notes_app = typer.Typer(add_completion=False, help="Notes commands")
@@ -108,7 +108,7 @@ def notes_list(
     try:
         container = build_container(profile=profile)
         resolved_project = resolve_project(container, project)
-        result: NotesListResult = container.notes_service.list(limit=limit, project=resolved_project)
+        result: NotesListResult = container.notes_service.list(limit=limit, project=resolved_project, view=resolve_view(container, view))
         typer.echo(
             json.dumps(
                 build_success_payload(
@@ -169,7 +169,12 @@ def notes_search(
     try:
         container = build_container(profile=profile)
         resolved_project = resolve_project(container, project)
-        result = container.notes_service.search(query=query, limit=limit, project=resolved_project)
+        result = container.notes_service.search(
+            query=query,
+            limit=limit,
+            project=resolved_project,
+            view=resolve_view(container, view),
+        )
         typer.echo(
             json.dumps(
                 build_success_payload(

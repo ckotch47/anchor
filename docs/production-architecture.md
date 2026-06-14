@@ -84,6 +84,7 @@ Retrieval is hybrid and should exist from the first production slice.
    - metatags are filterable through indexed JSON keys or materialized search columns
 2. Vector candidate generation
    - local scoring over stored chunk embeddings
+   - SQLite vector extension is loaded on connection open and initializes `chunk_embeddings` for the configured dimension
 3. Score fusion
    - explicit lexical/vector weighting, with lexical-only fallback when vector data is unavailable
 4. Rerank

@@ -59,6 +59,7 @@
 - `data` must contain the command result only.
 - `meta` is for execution details, not business state.
 - Retrieval commands should stay compact by default; `--view` is a request hint that is echoed in `meta` for compatibility with agent clients.
+- For `list` and `search`, `compact` returns the minimal agent payload and `full` expands the underlying domain records when the slice supports it.
 
 ## Per-command config
 
@@ -169,7 +170,7 @@ anchor notes delete --id note_123 --project repo-a
 ### `anchor notes list`
 
 - Returns the newest notes first.
-- Emits a compact navigation record per note, not the full body text.
+- Emits a compact navigation record per note by default; `--view full` expands each item to the full note record.
 - The target contract is project-scoped, so list/search should stay inside the selected project boundary.
 - Use `--project` to override the default project scope from config.
 - Use `--limit` to narrow the response.
@@ -196,9 +197,11 @@ anchor notes get --id note_123 --project repo-a
 
 - Searches note titles and bodies through the shared SQLite retrieval layer.
 - Uses FTS over materialized retrieval chunks and vector reranking through SQLite-native vector search.
+- On startup, the SQLite vector extension is loaded and the embeddings table is initialized for the configured dimension.
 - Chunking stays a separate preprocessing step before retrieval and rerank.
 - The search pipeline is lexical candidate generation, vector candidate generation, rerank, dedup by note, and budget trim.
 - The final response is capped by the configured token budget so agents get a compact result set.
+- `--view full` expands each hit to the full note record, while the default stays compact.
 - If embeddings or rerank are unavailable, search degrades to lexical-only instead of failing.
 - Search text is normalized before `MATCH`, so special FTS characters are treated as query text, not syntax.
 - The target contract is project-scoped and can further filter by metatags before ranking.
@@ -230,7 +233,9 @@ anchor history append --entry-type deploy --payload "Deploy step completed" --pr
 
 - Searches history entries through the shared retrieval layer.
 - Uses the same lexical/vector/rerank/budget pipeline as notes, with vector search executed inside SQLite when the extension is available.
+- Vector table initialization happens on connection open, so the search path does not depend on a separate service.
 - Is project-scoped and returns compact hits with only `id`, `project`, `entry_type`, `actor`, `correlation_id`, `created_at`, and `snippet`.
+- `--view full` expands each hit to the full history record.
 
 Example:
 
@@ -337,7 +342,9 @@ anchor files index --root ./repo --project repo-a
 - Searches indexed files through the same compact retrieval surface as notes and tasks.
 - Returns file path, root path, language, file size, a snippet, and a compact score.
 - Uses SQLite-native vector search when the extension is available.
+- The vector layer is initialized from the shared connection lifecycle, not a separate index daemon.
 - Uses the configured project scope by default.
+- `--view full` expands each hit to the full indexed file record.
 
 Example:
 
@@ -362,10 +369,11 @@ anchor tasks update --id task_123 --priority 5 --project repo-a
 ### `anchor tasks list`
 
 - Returns the newest tasks first.
-- Emits a compact navigation record per task with `id`, `title`, `status`, and `priority`.
+- Emits a compact navigation record per task by default; `--view full` expands each item to the full task record.
 - The target contract is project-scoped, so list/search should stay inside the selected project boundary.
 - Use `--project` to override the default project scope from config.
 - Use `--limit` to narrow the response.
+- `--view full` expands each task row to the full task record.
 
 Example:
 

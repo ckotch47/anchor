@@ -44,7 +44,7 @@ class FileListItem(BaseModel):
 
 
 class FileSearchHit(BaseModel):
-    file: FileListItem
+    file: IndexedFileRecord | FileListItem
     chunk_id: str
     score: float
     snippet: str

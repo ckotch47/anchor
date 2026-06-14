@@ -28,8 +28,9 @@ from anchor.application.retrieval.search_scoring import combine_search_scores, c
 
 class SqliteFilesRepository(SqliteRepositoryBase):
     EMBEDDING_INDEX_TYPE = "file_embeddings"
-    def __init__(self, database_path: Path | None = None) -> None:
-        super().__init__(database_path=database_path)
+
+    def __init__(self, database_path: Path | None = None, *, vector_dimension: int | None = None) -> None:
+        super().__init__(database_path=database_path, vector_dimension=vector_dimension)
 
     def upsert_file(
         self,

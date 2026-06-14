@@ -116,6 +116,7 @@ class HistoryService:
         *,
         project: str | None = None,
         budget_tokens: int | None = None,
+        view: str = "compact",
     ) -> HistorySearchResult:
         self._require_non_empty(query, "query")
         if limit <= 0:
@@ -132,7 +133,7 @@ class HistoryService:
         )
         results = [
             HistorySearchHit(
-                history=candidate.history,
+                history=self.get(candidate.history.id, project=resolved_project) if view == "full" else candidate.history,
                 chunk_id=candidate.chunk_id,
                 score=combine_search_scores(
                     lexical_score=candidate.lexical_score,

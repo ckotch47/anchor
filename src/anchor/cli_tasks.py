@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from anchor.application.tasks.models import TasksListResult, TasksSearchResult
-from anchor.cli_shared import build_success_payload, emit_error, parse_metatags, resolve_project
+from anchor.cli_shared import build_success_payload, emit_error, parse_metatags, resolve_project, resolve_view
 from anchor.container import build_container
 
 tasks_app = typer.Typer(add_completion=False, help="Tasks commands")
@@ -124,7 +124,11 @@ def tasks_list(
     try:
         container = build_container(profile=profile)
         resolved_project = resolve_project(container, project)
-        result: TasksListResult = container.tasks_service.list(limit=limit, project=resolved_project)
+        result: TasksListResult = container.tasks_service.list(
+            limit=limit,
+            project=resolved_project,
+            view=resolve_view(container, view),
+        )
         typer.echo(
             json.dumps(
                 build_success_payload(
@@ -155,7 +159,12 @@ def tasks_search(
     try:
         container = build_container(profile=profile)
         resolved_project = resolve_project(container, project)
-        result: TasksSearchResult = container.tasks_service.search(query=query, limit=limit, project=resolved_project)
+        result: TasksSearchResult = container.tasks_service.search(
+            query=query,
+            limit=limit,
+            project=resolved_project,
+            view=resolve_view(container, view),
+        )
         typer.echo(
             json.dumps(
                 build_success_payload(

@@ -44,5 +44,9 @@ def ensure_vector_index(connection: sqlite3.Connection, *, table: str, column: s
     return True
 
 
+def initialize_chunk_embeddings_vector(connection: sqlite3.Connection, dimension: int) -> bool:
+    return ensure_vector_index(connection, table="chunk_embeddings", column="embedding", dimension=dimension)
+
+
 def cosine_distance_to_score(distance: float) -> float:
     return 1.0 - distance

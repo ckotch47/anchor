@@ -27,7 +27,7 @@ class HistoryListItem(BaseModel):
 
 
 class HistorySearchHit(BaseModel):
-    history: HistoryListItem
+    history: HistoryRecord | HistoryListItem
     chunk_id: str
     score: float
     snippet: str

@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from anchor.application.files.models import FilesIndexResult, FilesSearchResult
-from anchor.cli_shared import build_success_payload, emit_error, resolve_project
+from anchor.cli_shared import build_success_payload, emit_error, resolve_project, resolve_view
 from anchor.container import build_container
 
 files_app = typer.Typer(add_completion=False, help="Filesystem commands")
@@ -51,7 +51,12 @@ def files_search(
     try:
         container = build_container(profile=profile)
         resolved_project = resolve_project(container, project)
-        result: FilesSearchResult = container.files_service.search(query=query, limit=limit, project=resolved_project)
+        result: FilesSearchResult = container.files_service.search(
+            query=query,
+            limit=limit,
+            project=resolved_project,
+            view=resolve_view(container, view),
+        )
         typer.echo(
             json.dumps(
                 build_success_payload(

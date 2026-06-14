@@ -19,12 +19,17 @@
 - Tests and examples should be part of the plan from the start.
 - Production architecture should use a shared document spine plus separate domain tables for notes, tasks, and history.
 - Retrieval should include lexical search, vector search, embeddings, and rerank from the first production slice.
+- Vector lifecycle is now: load SQLite vector extension, initialize `chunk_embeddings` for the configured dimension, then query with `vector_full_scan`; quantized ANN is a later optimization, not a startup requirement.
 
 ## Needs more design
 
 - Exact default values for per-command limits and budgets.
-- Which commands expose `full` view by default, if any.
 - Packaging/distribution choice.
+
+## Already decided for response shapes
+
+- `list` and `search` stay `compact` by default.
+- `--view full` expands the domain record only on slices that have a real full record to return.
 
 ## Already decided for filesystem retrieval
 

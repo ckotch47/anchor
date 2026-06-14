@@ -185,15 +185,29 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                 raise RuntimeError("updated task could not be reloaded")
             return updated
 
-    def list(self, limit: int, *, project: str) -> list[TaskListItem]:
+    def list(self, limit: int, *, project: str, full: bool = False) -> list[TaskListItem | TaskRecord]:
         with self._connect() as connection:
             rows = connection.execute(
                 """
                 SELECT
                     d.id,
+                    d.project,
+                    d.metatags,
                     d.title,
+                    d.body,
+                    d.source,
+                    d.source_ref,
+                    t.task_kind,
                     t.status,
-                    t.priority
+                    t.priority,
+                    t.due_at,
+                    t.started_at,
+                    t.completed_at,
+                    t.blocked_reason,
+                    t.parent_document_id,
+                    t.blocked_by_document_id,
+                    d.created_at,
+                    d.updated_at
                 FROM documents AS d
                 JOIN tasks AS t ON t.document_id = d.id
                 WHERE d.project = ? AND d.document_type = 'task' AND d.deleted_at IS NULL
@@ -202,7 +216,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                 """,
                 (project, limit),
             ).fetchall()
-            return [self._row_to_list_item(row) for row in rows]
+            return [self._row_to_record(row) if full else self._row_to_list_item(row) for row in rows]
 
     def get(self, task_id: str, *, project: str) -> TaskRecord | None:
         with self._connect() as connection:

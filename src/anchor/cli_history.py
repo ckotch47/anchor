@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from anchor.application.history.models import HistorySearchResult
-from anchor.cli_shared import build_success_payload, emit_error, parse_metatags, resolve_project
+from anchor.cli_shared import build_success_payload, emit_error, parse_metatags, resolve_project, resolve_view
 from anchor.container import build_container
 
 history_app = typer.Typer(add_completion=False, help="History commands")
@@ -105,7 +105,12 @@ def history_search(
     try:
         container = build_container(profile=profile)
         resolved_project = resolve_project(container, project)
-        result: HistorySearchResult = container.history_service.search(query=query, limit=limit, project=resolved_project)
+        result: HistorySearchResult = container.history_service.search(
+            query=query,
+            limit=limit,
+            project=resolved_project,
+            view=resolve_view(container, view),
+        )
         typer.echo(
             json.dumps(
                 build_success_payload(
