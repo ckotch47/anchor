@@ -185,10 +185,23 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                 raise RuntimeError("updated task could not be reloaded")
             return updated
 
-    def list(self, limit: int, *, project: str, full: bool = False) -> list[TaskListItem | TaskRecord]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
+    def list(
+        self,
+        limit: int,
+        *,
+        project: str,
+        full: bool = False,
+        cursor_id: str | None = None,
+    ) -> list[TaskListItem | TaskRecord]:
+        if cursor_id is not None and not cursor_id.strip():
+            raise ValueError("list cursor requires a non-empty cursor_id")
+        clauses = ["d.project = ?", "d.document_type = 'task'", "d.deleted_at IS NULL"]
+        params: list[object] = [project]
+        if cursor_id is not None:
+            clauses.append("d.id < ?")
+            params.append(cursor_id)
+        query = (
+            """
                 SELECT
                     d.id,
                     d.project,
@@ -210,12 +223,13 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                     d.updated_at
                 FROM documents AS d
                 JOIN tasks AS t ON t.document_id = d.id
-                WHERE d.project = ? AND d.document_type = 'task' AND d.deleted_at IS NULL
-                ORDER BY d.created_at DESC, d.id DESC
+                WHERE {where_clause}
+                ORDER BY d.id DESC
                 LIMIT ?
-                """,
-                (project, limit),
-            ).fetchall()
+                """
+        ).format(where_clause=" AND ".join(clauses))
+        with self._connect() as connection:
+            rows = connection.execute(query, (*params, limit)).fetchall()
             return [self._row_to_record(row) if full else self._row_to_list_item(row) for row in rows]
 
     def get(self, task_id: str, *, project: str) -> TaskRecord | None:

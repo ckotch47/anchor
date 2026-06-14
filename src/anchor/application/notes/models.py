@@ -56,6 +56,7 @@ class NotesSearchCandidate(BaseModel):
 class NotesListResult(BaseModel):
     count: int
     notes: list[NoteRecord | NoteListItem]
+    next_cursor: str | None = None
 
 
 class NotesSearchResult(BaseModel):

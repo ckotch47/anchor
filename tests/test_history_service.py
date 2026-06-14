@@ -199,8 +199,8 @@ class HistoryServiceTest(unittest.TestCase):
 
         self.assertEqual(history.id, HISTORY_ID)
         self.assertEqual(uuid.UUID(history.correlation_id).version, 7)
-        self.assertEqual(repo.pending_embedding_ids, [HISTORY_ID])
-        self.assertEqual(len(repo.stored_embeddings), 0)
+        self.assertEqual(repo.pending_embedding_ids, [])
+        self.assertGreater(len(repo.stored_embeddings), 0)
 
     def test_search_drains_pending_embeddings_and_returns_hits(self) -> None:
         repo = FakeHistoryRepository()
@@ -236,7 +236,8 @@ class HistoryServiceTest(unittest.TestCase):
 
         self.assertEqual(updated.payload, "four five six")
         self.assertEqual(updated.actor, "bot")
-        self.assertEqual(repo.pending_embedding_ids, [HISTORY_ID])
+        self.assertEqual(repo.pending_embedding_ids, [])
+        self.assertGreater(len(repo.stored_embeddings), 0)
 
     def test_append_rejects_non_uuidv7_correlation_id(self) -> None:
         repo = FakeHistoryRepository()

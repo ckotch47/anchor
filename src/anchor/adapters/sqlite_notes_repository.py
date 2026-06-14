@@ -10,6 +10,7 @@ from anchor.adapters.sqlite_support import utc_now_iso
 from anchor.adapters.sqlite_vector_support import (
     cosine_distance_to_score,
     ensure_vector_index,
+    require_vector_extension_for_large_python_fallback,
     try_load_sqlite_vector_extension,
 )
 from anchor.application.embeddings.models import ChunkEmbeddingRecord, DocumentChunkRecord
@@ -215,10 +216,22 @@ class SqliteNotesRepository(SqliteRepositoryBase):
             connection.commit()
         return current
 
-    def list(self, limit: int, *, project: str) -> list[NoteRecord]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
+    def list(
+        self,
+        limit: int,
+        *,
+        project: str,
+        cursor_id: str | None = None,
+    ) -> list[NoteRecord]:
+        if cursor_id is not None and not cursor_id.strip():
+            raise ValueError("list cursor requires a non-empty cursor_id")
+        clauses = ["d.project = ?", "d.document_type = 'note'", "d.deleted_at IS NULL"]
+        params: list[object] = [project]
+        if cursor_id is not None:
+            clauses.append("d.id < ?")
+            params.append(cursor_id)
+        query = (
+            """
                 SELECT
                     d.id,
                     d.project,
@@ -234,11 +247,15 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                     d.updated_at
                 FROM documents AS d
                 JOIN notes AS n ON n.document_id = d.id
-                WHERE d.project = ? AND d.document_type = 'note' AND d.deleted_at IS NULL
-                ORDER BY d.created_at DESC, d.id DESC
+                WHERE {where_clause}
+                ORDER BY d.id DESC
                 LIMIT ?
-                """,
-                (project, limit),
+                """
+        ).format(where_clause=" AND ".join(clauses))
+        with self._connect() as connection:
+            rows = connection.execute(
+                query,
+                (*params, limit),
             ).fetchall()
             return [self._row_to_record(row) for row in rows]
 
@@ -440,7 +457,10 @@ class SqliteNotesRepository(SqliteRepositoryBase):
         project: str,
     ) -> list[NotesSearchCandidate]:
         with self._write_connect() as connection:
-            if ensure_vector_index(connection, table="chunk_embeddings", column="embedding", dimension=len(query_embedding)):
+            vector_extension_loaded = try_load_sqlite_vector_extension(connection)
+            if vector_extension_loaded and ensure_vector_index(
+                connection, table="chunk_embeddings", column="embedding", dimension=len(query_embedding)
+            ):
                 rows = connection.execute(
                     """
                     SELECT
@@ -491,6 +511,8 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                     reverse=True,
                 )
                 return candidates[:limit]
+            if not vector_extension_loaded:
+                require_vector_extension_for_large_python_fallback(connection, project=project)
             rows = connection.execute(
                 """
                 SELECT

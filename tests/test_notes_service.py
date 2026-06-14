@@ -106,7 +106,13 @@ class FakeNotesRepository:
             ]
         return self.created
 
-    def list(self, limit: int, *, project: str):  # pragma: no cover - not used in test
+    def list(
+        self,
+        limit: int,
+        *,
+        project: str,
+        cursor_id: str | None = None,
+    ):  # pragma: no cover - not used in test
         return []
 
     def get(self, note_id: str, *, project: str):  # pragma: no cover - not used in test
@@ -266,8 +272,8 @@ class NotesServiceTest(unittest.TestCase):
         note = service.add(title="Hello", body="one two three", source="cli")
 
         self.assertEqual(note.id, NOTE_ID)
-        self.assertEqual(repo.pending_embedding_ids, [NOTE_ID])
-        self.assertEqual(len(repo.stored_embeddings), 0)
+        self.assertEqual(repo.pending_embedding_ids, [])
+        self.assertGreater(len(repo.stored_embeddings), 0)
 
     def test_update_requeues_embeddings(self) -> None:
         repo = FakeNotesRepository()
@@ -283,8 +289,65 @@ class NotesServiceTest(unittest.TestCase):
 
         self.assertEqual(updated.title, "Hello again")
         self.assertEqual(updated.body, "four five six")
-        self.assertEqual(repo.pending_embedding_ids, [NOTE_ID])
-        self.assertEqual(len(repo.stored_embeddings), 0)
+        self.assertEqual(repo.pending_embedding_ids, [])
+        self.assertGreater(len(repo.stored_embeddings), 0)
+
+    def test_list_supports_cursor_pagination(self) -> None:
+        first_note = NoteRecord(
+            id=NOTE_ID,
+            project="repo-a",
+            metatags={},
+            title="First note",
+            body="first body",
+            source="cli",
+            source_ref="",
+            note_kind="note",
+            pinned=False,
+            archived_at=None,
+            created_at="2026-06-13T00:00:00+00:00",
+            updated_at="2026-06-13T00:00:00+00:00",
+        )
+        second_note = NoteRecord(
+            id=NOTE_OTHER_ID,
+            project="repo-a",
+            metatags={},
+            title="Second note",
+            body="second body",
+            source="cli",
+            source_ref="",
+            note_kind="note",
+            pinned=False,
+            archived_at=None,
+            created_at="2026-06-12T00:00:00+00:00",
+            updated_at="2026-06-12T00:00:00+00:00",
+        )
+
+        class PaginatedRepository(FakeNotesRepository):
+            def list(
+                self,
+                limit: int,
+                *,
+                project: str,
+                cursor_id: str | None = None,
+            ):
+                del project
+                if cursor_id is None and limit == 2:
+                    return [first_note, second_note]
+                if cursor_id == first_note.id and limit == 2:
+                    return [second_note]
+                return []
+
+        service = NotesService(repository=PaginatedRepository(), chunking_service=DocumentChunkingService(), project="workspace")
+
+        first_page = service.list(project="repo-a", limit=1)
+        second_page = service.list(project="repo-a", limit=1, cursor=first_page.next_cursor)
+
+        self.assertEqual(first_page.count, 1)
+        self.assertIsNotNone(first_page.next_cursor)
+        self.assertEqual(first_page.notes[0].id, NOTE_ID)
+        self.assertEqual(second_page.count, 1)
+        self.assertIsNone(second_page.next_cursor)
+        self.assertEqual(second_page.notes[0].id, NOTE_OTHER_ID)
 
     def test_search_drains_pending_embeddings(self) -> None:
         repo = SearchPipelineRepository()
@@ -300,11 +363,12 @@ class NotesServiceTest(unittest.TestCase):
         )
 
         service.add(title="Hello", body="alpha body content", source="cli", project="repo-a")
-        self.assertEqual(len(repo.stored_embeddings), 0)
+        self.assertGreater(len(repo.stored_embeddings), 0)
 
         result = service.search("alpha", limit=4, project="repo-a")
 
         self.assertEqual(result.count, 2)
+        self.assertEqual(repo.pending_embedding_ids, [])
         self.assertGreaterEqual(len(repo.stored_embeddings), 1)
 
     def test_update_rejects_empty_payload(self) -> None:

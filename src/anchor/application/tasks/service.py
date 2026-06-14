@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import json
+
 from anchor.adapters.sqlite_ids import ensure_uuid7_str
 from anchor.adapters.sqlite_tasks_repository import SqliteTasksRepository
 from anchor.application.retrieval.document_chunking import count_tokens
@@ -113,13 +116,30 @@ class TasksService:
             raise LookupError(f"task not found: {task_id}")
         return result
 
-    def list(self, limit: int = 20, *, project: str | None = None, view: str = "compact") -> TasksListResult:
+    def list(
+        self,
+        limit: int = 20,
+        *,
+        project: str | None = None,
+        cursor: str | None = None,
+        view: str = "compact",
+    ) -> TasksListResult:
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
+        cursor_id = self._decode_cursor(cursor)
         try:
-            tasks = self._repository.list(limit, project=project or self._project, full=view == "full")
+            tasks = self._repository.list(
+                limit + 1,
+                project=project or self._project,
+                full=view == "full",
+                cursor_id=cursor_id,
+            )
         except TypeError:
-            tasks = self._repository.list(limit, project=project or self._project)
+            tasks = self._repository.list(limit + 1, project=project or self._project)
+        next_cursor = None
+        if len(tasks) > limit:
+            next_cursor = self._encode_cursor(tasks[limit - 1].id)
+            tasks = tasks[:limit]
         return TasksListResult(
             count=len(tasks),
             tasks=tasks if view == "full" else [
@@ -131,6 +151,7 @@ class TasksService:
                 )
                 for task in tasks
             ],
+            next_cursor=next_cursor,
         )
 
     def search(
@@ -196,3 +217,25 @@ class TasksService:
             trimmed.append(result)
             total_tokens += result_cost
         return trimmed
+
+    @staticmethod
+    def _encode_cursor(task_id: str) -> str:
+        payload = json.dumps({"id": task_id}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _decode_cursor(cursor: str | None) -> str | None:
+        if cursor is None or not cursor.strip():
+            return None
+        padding = "=" * (-len(cursor) % 4)
+        try:
+            raw_value = base64.urlsafe_b64decode(f"{cursor}{padding}".encode("ascii")).decode("utf-8")
+            payload = json.loads(raw_value)
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("cursor must be an opaque pagination token") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("cursor must be an opaque pagination token")
+        task_id = payload.get("id")
+        if not isinstance(task_id, str) or not task_id:
+            raise ValueError("cursor must be an opaque pagination token")
+        return task_id

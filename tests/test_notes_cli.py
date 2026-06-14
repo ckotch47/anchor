@@ -21,12 +21,15 @@ class NotesCliTest(unittest.TestCase):
                 with patch("anchor.container.default_database_path", return_value=db_path):
                     with patch("typer.echo") as add_echo_mock:
                         notes_add(title="First note", body="Body text", source="cli", pinned=True)
+                    with patch("typer.echo") as second_add_echo_mock:
+                        notes_add(title="Second note", body="More body text", source="cli")
 
                     add_payload = json.loads(add_echo_mock.call_args.args[0])
                     note_id = add_payload["data"]["note"]["id"]
+                    second_note_id = json.loads(second_add_echo_mock.call_args.args[0])["data"]["note"]["id"]
 
                     with patch("typer.echo") as list_echo_mock:
-                        notes_list(view="full")
+                        notes_list(view="full", limit=1)
 
                     list_payload = json.loads(list_echo_mock.call_args.args[0])
                     with patch("typer.echo") as get_echo_mock:
@@ -43,9 +46,10 @@ class NotesCliTest(unittest.TestCase):
         self.assertEqual(list_payload["command"], "notes.list")
         self.assertEqual(list_payload["data"]["count"], 1)
         self.assertEqual(list_payload["meta"]["view"], "full")
-        self.assertEqual(list_payload["data"]["notes"][0]["id"], note_id)
+        self.assertEqual(list_payload["data"]["notes"][0]["id"], second_note_id)
         self.assertEqual(list_payload["data"]["notes"][0]["project"], "workspace")
         self.assertIn("body", list_payload["data"]["notes"][0])
+        self.assertIn("next_cursor", list_payload["data"])
         self.assertTrue(get_payload["ok"])
         self.assertEqual(get_payload["command"], "notes.get")
         self.assertEqual(get_payload["data"]["note"]["id"], note_id)

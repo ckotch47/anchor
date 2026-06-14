@@ -43,6 +43,7 @@ class TaskSearchHit(BaseModel):
 class TasksListResult(BaseModel):
     count: int
     tasks: list[TaskRecord | TaskListItem]
+    next_cursor: str | None = None
 
 
 class TasksSearchResult(BaseModel):

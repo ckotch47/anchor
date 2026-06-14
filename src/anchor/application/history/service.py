@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import OrderedDict
+from time import monotonic
 
 from anchor.adapters.sqlite_history_repository import SqliteHistoryRepository
 from anchor.adapters.sqlite_ids import ensure_uuid7_str, uuid7_str
@@ -65,6 +66,7 @@ class HistoryService:
             chunks=chunks,
         )
         self._queue_embeddings(result.id)
+        self._drain_pending_embeddings(resolved_project, limit=1, time_budget_seconds=0.1)
         return result
 
     def update(
@@ -108,6 +110,7 @@ class HistoryService:
             raise LookupError(f"history entry not found: {history_id}")
         if chunks is not None:
             self._queue_embeddings(result.id)
+            self._drain_pending_embeddings(resolved_project, limit=1, time_budget_seconds=0.1)
         return result
 
     def delete(self, history_id: str, *, project: str | None = None) -> HistoryRecord:
@@ -167,14 +170,23 @@ class HistoryService:
         except Exception:
             return
 
-    def _drain_pending_embeddings(self, project: str) -> None:
+    def _drain_pending_embeddings(
+        self,
+        project: str,
+        *,
+        limit: int = 8,
+        time_budget_seconds: float | None = None,
+    ) -> None:
         if self._embedding_service is None or not hasattr(self._repository, "pending_embedding_documents"):
             return
         try:
-            pending_documents = self._repository.pending_embedding_documents(project=project)
+            pending_documents = self._repository.pending_embedding_documents(project=project, limit=limit)
         except Exception:
             return
+        started_at = monotonic()
         for document_id in pending_documents:
+            if time_budget_seconds is not None and monotonic() - started_at >= time_budget_seconds:
+                break
             try:
                 chunks = self._repository.list_chunks(document_id)
                 if not chunks:

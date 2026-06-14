@@ -29,12 +29,15 @@ class TasksCliTest(unittest.TestCase):
                             due_at="2026-06-30T00:00:00+00:00",
                             parent_document_id=uuid7_str(),
                         )
+                    with patch("typer.echo") as second_add_echo_mock:
+                        tasks_add(title="Second task", body="Second body", project="repo-a")
 
                     add_payload = json.loads(add_echo_mock.call_args.args[0])
                     task_id = add_payload["data"]["task"]["id"]
+                    second_task_id = json.loads(second_add_echo_mock.call_args.args[0])["data"]["task"]["id"]
 
                     with patch("typer.echo") as list_echo_mock:
-                        tasks_list(project="repo-a", view="full")
+                        tasks_list(project="repo-a", view="full", limit=1)
 
                     list_payload = json.loads(list_echo_mock.call_args.args[0])
                     with patch("typer.echo") as done_echo_mock:
@@ -47,10 +50,11 @@ class TasksCliTest(unittest.TestCase):
         self.assertEqual(add_payload["data"]["task"]["metatags"], {"topic": "tasks"})
         self.assertEqual(list_payload["command"], "tasks.list")
         self.assertEqual(list_payload["data"]["count"], 1)
-        self.assertEqual(list_payload["data"]["tasks"][0]["title"], "Ship tasks slice")
+        self.assertEqual(list_payload["data"]["tasks"][0]["id"], second_task_id)
+        self.assertEqual(list_payload["data"]["tasks"][0]["title"], "Second task")
         self.assertEqual(list_payload["data"]["tasks"][0]["status"], "open")
-        self.assertEqual(list_payload["data"]["tasks"][0]["priority"], 2)
         self.assertIn("body", list_payload["data"]["tasks"][0])
+        self.assertIn("next_cursor", list_payload["data"])
         self.assertEqual(done_payload["command"], "tasks.done")
         self.assertEqual(done_payload["data"]["task"]["status"], "done")
 

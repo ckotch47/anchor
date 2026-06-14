@@ -101,6 +101,7 @@ def notes_update(
 @notes_app.command(name="list")
 def notes_list(
     limit: Annotated[int, typer.Option("--limit")] = 20,
+    cursor: Annotated[str | None, typer.Option("--cursor")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     view: Annotated[str | None, typer.Option("--view")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
@@ -108,12 +109,21 @@ def notes_list(
     try:
         container = build_container(profile=profile)
         resolved_project = resolve_project(container, project)
-        result: NotesListResult = container.notes_service.list(limit=limit, project=resolved_project, view=resolve_view(container, view))
+        result: NotesListResult = container.notes_service.list(
+            limit=limit,
+            cursor=cursor,
+            project=resolved_project,
+            view=resolve_view(container, view),
+        )
         typer.echo(
             json.dumps(
                 build_success_payload(
                     "notes.list",
-                    {"count": result.count, "notes": [note.model_dump() for note in result.notes]},
+                    {
+                        "count": result.count,
+                        "notes": [note.model_dump() for note in result.notes],
+                        **({"next_cursor": result.next_cursor} if result.next_cursor is not None else {}),
+                    },
                     container,
                     view=view,
                     extra_meta={"project": resolved_project},

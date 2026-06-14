@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
 from collections import OrderedDict
+from time import monotonic
 
 from anchor.adapters.sqlite_notes_repository import SqliteNotesRepository
 from anchor.application.embeddings.service import EmbeddingService
@@ -61,6 +63,7 @@ class NotesService:
             chunks=chunks,
         )
         self._queue_embeddings(result.id)
+        self._drain_pending_embeddings(resolved_project, limit=1, time_budget_seconds=0.1)
         return result
 
     def update(
@@ -104,15 +107,33 @@ class NotesService:
             raise LookupError(f"note not found: {note_id}")
         if chunks is not None:
             self._queue_embeddings(result.id)
+            self._drain_pending_embeddings(resolved_project, limit=1, time_budget_seconds=0.1)
         return result
 
-    def list(self, limit: int = 20, *, project: str | None = None, view: str = "compact") -> NotesListResult:
+    def list(
+        self,
+        limit: int = 20,
+        *,
+        project: str | None = None,
+        cursor: str | None = None,
+        view: str = "compact",
+    ) -> NotesListResult:
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
-        notes = self._repository.list(limit, project=project or self._project)
+        cursor_id = self._decode_cursor(cursor)
+        notes = self._repository.list(
+            limit + 1,
+            project=project or self._project,
+            cursor_id=cursor_id,
+        )
+        next_cursor = None
+        if len(notes) > limit:
+            next_cursor = self._encode_cursor(notes[limit - 1].id)
+            notes = notes[:limit]
         return NotesListResult(
             count=len(notes),
             notes=notes if view == "full" else [compact_note_list_item(note) for note in notes],
+            next_cursor=next_cursor,
         )
 
     def get(self, note_id: str, *, project: str | None = None) -> NoteRecord:
@@ -179,14 +200,23 @@ class NotesService:
         except Exception:
             return
 
-    def _drain_pending_embeddings(self, project: str) -> None:
+    def _drain_pending_embeddings(
+        self,
+        project: str,
+        *,
+        limit: int = 8,
+        time_budget_seconds: float | None = None,
+    ) -> None:
         if self._embedding_service is None or not hasattr(self._repository, "pending_embedding_documents"):
             return
         try:
-            pending_documents = self._repository.pending_embedding_documents(project=project)
+            pending_documents = self._repository.pending_embedding_documents(project=project, limit=limit)
         except Exception:
             return
+        started_at = monotonic()
         for document_id in pending_documents:
+            if time_budget_seconds is not None and monotonic() - started_at >= time_budget_seconds:
+                break
             try:
                 chunks = self._repository.list_chunks(document_id)
                 if not chunks:
@@ -212,6 +242,28 @@ class NotesService:
     @staticmethod
     def _serialize_metatags(metatags: dict[str, object]) -> str:
         return json.dumps(metatags, separators=(",", ":"), ensure_ascii=False)
+
+    @staticmethod
+    def _encode_cursor(note_id: str) -> str:
+        payload = json.dumps({"id": note_id}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _decode_cursor(cursor: str | None) -> str | None:
+        if cursor is None or not cursor.strip():
+            return None
+        padding = "=" * (-len(cursor) % 4)
+        try:
+            raw_value = base64.urlsafe_b64decode(f"{cursor}{padding}".encode("ascii")).decode("utf-8")
+            payload = json.loads(raw_value)
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("cursor must be an opaque pagination token") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("cursor must be an opaque pagination token")
+        note_id = payload.get("id")
+        if not isinstance(note_id, str) or not note_id:
+            raise ValueError("cursor must be an opaque pagination token")
+        return note_id
 
     def _collect_candidates(
         self,

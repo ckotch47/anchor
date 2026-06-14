@@ -117,6 +117,7 @@ def tasks_update(
 @tasks_app.command(name="list")
 def tasks_list(
     limit: Annotated[int, typer.Option("--limit")] = 20,
+    cursor: Annotated[str | None, typer.Option("--cursor")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     view: Annotated[str | None, typer.Option("--view")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
@@ -126,6 +127,7 @@ def tasks_list(
         resolved_project = resolve_project(container, project)
         result: TasksListResult = container.tasks_service.list(
             limit=limit,
+            cursor=cursor,
             project=resolved_project,
             view=resolve_view(container, view),
         )
@@ -133,7 +135,11 @@ def tasks_list(
             json.dumps(
                 build_success_payload(
                     "tasks.list",
-                    {"count": result.count, "tasks": [task.model_dump() for task in result.tasks]},
+                    {
+                        "count": result.count,
+                        "tasks": [task.model_dump() for task in result.tasks],
+                        **({"next_cursor": result.next_cursor} if result.next_cursor is not None else {}),
+                    },
                     container,
                     view=view,
                     extra_meta={"project": resolved_project},

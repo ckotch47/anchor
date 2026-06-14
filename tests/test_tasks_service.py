@@ -57,7 +57,15 @@ class FakeTasksRepository:
         )
         return self.created
 
-    def list(self, limit: int, *, project: str):
+    def list(
+        self,
+        limit: int,
+        *,
+        project: str,
+        full: bool = False,
+        cursor_id: str | None = None,
+    ):
+        del project, full, cursor_id
         return [
             TaskListItem(
                 id=TASK_LIST_ID,
@@ -184,6 +192,37 @@ class TasksServiceTest(unittest.TestCase):
         self.assertEqual(listing.tasks[0].id, TASK_LIST_ID)
         self.assertEqual(done.status, "done")
         self.assertIsNotNone(repo.completed)
+
+    def test_list_supports_cursor_pagination(self) -> None:
+        class PaginatedRepository(FakeTasksRepository):
+            def list(
+                self,
+                limit: int,
+                *,
+                project: str,
+                full: bool = False,
+                cursor_id: str | None = None,
+            ):
+                del project, full
+                first = TaskListItem(id=TASK_LIST_ID, title="Task one", status="open", priority=0)
+                second = TaskListItem(id=TASK_OTHER_ID, title="Task two", status="open", priority=1)
+                if cursor_id is None and limit == 2:
+                    return [first, second]
+                if cursor_id == TASK_LIST_ID and limit == 2:
+                    return [second]
+                return []
+
+        service = TasksService(repository=PaginatedRepository(), project="workspace")
+
+        first_page = service.list(project="repo-a", limit=1)
+        second_page = service.list(project="repo-a", limit=1, cursor=first_page.next_cursor)
+
+        self.assertEqual(first_page.count, 1)
+        self.assertIsNotNone(first_page.next_cursor)
+        self.assertEqual(first_page.tasks[0].id, TASK_LIST_ID)
+        self.assertEqual(second_page.count, 1)
+        self.assertIsNone(second_page.next_cursor)
+        self.assertEqual(second_page.tasks[0].id, TASK_OTHER_ID)
 
     def test_search_returns_compact_hits(self) -> None:
         repo = FakeTasksRepository()

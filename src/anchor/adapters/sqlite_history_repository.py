@@ -10,6 +10,7 @@ from anchor.adapters.sqlite_support import utc_now_iso
 from anchor.adapters.sqlite_vector_support import (
     cosine_distance_to_score,
     ensure_vector_index,
+    require_vector_extension_for_large_python_fallback,
     try_load_sqlite_vector_extension,
 )
 from anchor.application.embeddings.models import ChunkEmbeddingRecord, DocumentChunkRecord
@@ -379,7 +380,10 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
         project: str,
     ) -> list[HistorySearchCandidate]:
         with self._connect() as connection:
-            if ensure_vector_index(connection, table="chunk_embeddings", column="embedding", dimension=len(query_embedding)):
+            vector_extension_loaded = try_load_sqlite_vector_extension(connection)
+            if vector_extension_loaded and ensure_vector_index(
+                connection, table="chunk_embeddings", column="embedding", dimension=len(query_embedding)
+            ):
                 rows = connection.execute(
                     """
                     SELECT
@@ -427,6 +431,8 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
                     reverse=True,
                 )
                 return candidates[:limit]
+            if not vector_extension_loaded:
+                require_vector_extension_for_large_python_fallback(connection, project=project)
             rows = connection.execute(
                 """
                 SELECT
