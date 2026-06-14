@@ -3,9 +3,10 @@ from __future__ import annotations
 import base64
 import json
 
-from anchor.adapters.sqlite_ids import ensure_uuid7_str
+from anchor.adapters.sqlite_ids import ensure_uuid7_str, uuid7_str
 from anchor.adapters.sqlite_tasks_repository import SqliteTasksRepository
 from anchor.application.retrieval.document_chunking import count_tokens
+from anchor.application.system.metadata_service import MetadataSchemaService
 from anchor.application.tasks.models import TaskListItem, TaskRecord, TaskSearchHit, TasksListResult, TasksSearchResult
 
 
@@ -14,10 +15,12 @@ class TasksService:
         self,
         repository: SqliteTasksRepository,
         project: str,
+        metadata_service: MetadataSchemaService | None = None,
         budget_tokens: int = 800,
     ) -> None:
         self._repository = repository
         self._project = project
+        self._metadata_service = metadata_service
         self._budget_tokens = budget_tokens
 
     def add(
@@ -28,6 +31,7 @@ class TasksService:
         source: str = "cli",
         source_ref: str = "",
         project: str | None = None,
+        correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
         task_kind: str = "task",
         priority: int = 0,
@@ -41,12 +45,15 @@ class TasksService:
             ensure_uuid7_str(parent_document_id, "parent_document_id")
         if blocked_by_document_id is not None:
             ensure_uuid7_str(blocked_by_document_id, "blocked_by_document_id")
+        resolved_correlation_id = self._resolve_correlation_id(correlation_id)
+        self._validate_metatags("tasks", metatags or {})
         result = self._repository.create(
             title=title,
             body=body,
             source=source,
             source_ref=source_ref,
             project=project or self._project,
+            correlation_id=resolved_correlation_id,
             metatags=metatags or {},
             task_kind=task_kind,
             priority=priority,
@@ -65,6 +72,7 @@ class TasksService:
         source: str | None = None,
         source_ref: str | None = None,
         project: str | None = None,
+        correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
         task_kind: str | None = None,
         priority: int | None = None,
@@ -81,6 +89,10 @@ class TasksService:
             ensure_uuid7_str(parent_document_id, "parent_document_id")
         if blocked_by_document_id is not None:
             ensure_uuid7_str(blocked_by_document_id, "blocked_by_document_id")
+        if correlation_id is not None:
+            self._validate_correlation_id(correlation_id)
+        if metatags is not None:
+            self._validate_metatags("tasks", metatags)
         if all(
             value is None
             for value in (
@@ -88,6 +100,7 @@ class TasksService:
                 body,
                 source,
                 source_ref,
+                correlation_id,
                 metatags,
                 task_kind,
                 priority,
@@ -105,6 +118,7 @@ class TasksService:
             body=body,
             source=source,
             source_ref=source_ref,
+            correlation_id=correlation_id,
             metatags=metatags,
             task_kind=task_kind,
             priority=priority,
@@ -209,6 +223,21 @@ class TasksService:
     def _require_non_empty(value: str, field: str) -> None:
         if not value.strip():
             raise ValueError(f"{field} must not be empty")
+
+    @staticmethod
+    def _validate_correlation_id(correlation_id: str) -> None:
+        ensure_uuid7_str(correlation_id, "correlation_id")
+
+    def _resolve_correlation_id(self, correlation_id: str | None) -> str:
+        if correlation_id is None or not correlation_id.strip():
+            return uuid7_str()
+        self._validate_correlation_id(correlation_id)
+        return correlation_id
+
+    def _validate_metatags(self, entity_type: str, metatags: dict[str, object]) -> None:
+        if self._metadata_service is None:
+            return
+        self._metadata_service.validate(entity_type, metatags)
 
     @staticmethod
     def _estimate_result_tokens(result: TaskSearchHit) -> int:

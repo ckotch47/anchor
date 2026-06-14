@@ -25,6 +25,7 @@ from anchor.application.retrieval.compact_items import compact_file_item
 from anchor.application.retrieval.document_chunking import count_tokens
 from anchor.application.retrieval.rerank_service import RerankService
 from anchor.application.retrieval.search_scoring import combine_search_scores
+from anchor.application.system.metadata_service import MetadataSchemaService
 
 _BINARY_SUFFIXES = {
     ".png",
@@ -66,6 +67,7 @@ class FilesService:
         project: str,
         embedding_service: EmbeddingService | None = None,
         rerank_service: RerankService | None = None,
+        metadata_service: MetadataSchemaService | None = None,
         roots: list[str] | None = None,
         ignore_patterns: list[str] | None = None,
         max_file_size: int = 1_000_000,
@@ -78,6 +80,7 @@ class FilesService:
         self._project = project
         self._embedding_service = embedding_service
         self._rerank_service = rerank_service
+        self._metadata_service = metadata_service
         self._roots = roots or []
         self._ignore_patterns = ignore_patterns or []
         self._max_file_size = max_file_size
@@ -351,6 +354,8 @@ class FilesService:
     def _flush_index_batch(self, batch: list[FileIndexDraft]) -> None:
         if not batch:
             return
+        for draft in batch:
+            self._validate_metatags("files", draft.metatags)
         self._repository.upsert_files(batch)
         for draft in batch:
             self._queue_embeddings(draft.document_id)
@@ -656,6 +661,11 @@ class FilesService:
     @staticmethod
     def _serialize_metatags(metatags: dict[str, object]) -> str:
         return json.dumps(metatags, ensure_ascii=False, separators=(",", ":"))
+
+    def _validate_metatags(self, entity_type: str, metatags: dict[str, object]) -> None:
+        if self._metadata_service is None:
+            return
+        self._metadata_service.validate(entity_type, metatags)
 
     @staticmethod
     def _chunk_values(values: list[str], *, size: int) -> list[list[str]]:

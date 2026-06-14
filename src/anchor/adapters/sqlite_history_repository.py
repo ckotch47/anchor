@@ -47,11 +47,21 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
             connection.execute(
                 """
                 INSERT INTO documents (
-                    id, project, metatags, document_type, title, body, source, source_ref, created_at, updated_at, deleted_at
+                    id, project, metatags, correlation_id, document_type, title, body, source, source_ref, created_at, updated_at, deleted_at
                 )
-                VALUES (?, ?, ?, 'history', ?, ?, 'history', ?, ?, ?, NULL)
+                VALUES (?, ?, ?, ?, 'history', ?, ?, 'history', ?, ?, ?, NULL)
                 """,
-                (document_id, project, serialized_metatags, entry_type, body_value, correlation_id, now, now),
+                (
+                    document_id,
+                    project,
+                    serialized_metatags,
+                    correlation_id,
+                    entry_type,
+                    body_value,
+                    correlation_id,
+                    now,
+                    now,
+                ),
             )
             connection.execute(
                 """
@@ -128,7 +138,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
             connection.execute(
                 """
                 UPDATE documents
-                SET title = ?, body = ?, source_ref = ?, metatags = ?, updated_at = ?
+                SET title = ?, body = ?, source_ref = ?, metatags = ?, correlation_id = ?, updated_at = ?
                 WHERE id = ? AND project = ? AND document_type = 'history' AND deleted_at IS NULL
                 """,
                 (
@@ -136,6 +146,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
                     updated_payload,
                     updated_correlation_id,
                     serialized_metatags,
+                    updated_correlation_id,
                     now,
                     document_id,
                     project,

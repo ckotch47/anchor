@@ -322,6 +322,13 @@ CREATE INDEX IF NOT EXISTS idx_file_chunks_project_document_id ON file_chunks(pr
 CREATE INDEX IF NOT EXISTS idx_file_chunks_project_path_chunk_index ON file_chunks(project, path, chunk_index);
 """.strip(),
     ),
+    Migration(
+        version=7,
+        name="0007_add_documents_correlation_id",
+        sql="""
+ALTER TABLE documents ADD COLUMN correlation_id TEXT NOT NULL DEFAULT '';
+""".strip(),
+    ),
 ]
 
 

@@ -33,6 +33,7 @@ class FakeNotesRepository:
         source_ref: str,
         pinned: bool,
         project: str,
+        correlation_id: str,
         metatags: dict[str, object] | None = None,
         chunks,
     ):
@@ -40,6 +41,7 @@ class FakeNotesRepository:
             id=NOTE_ID,
             project=project,
             metatags=metatags or {},
+            correlation_id=correlation_id,
             title=title,
             body=body,
             source=source,
@@ -74,6 +76,7 @@ class FakeNotesRepository:
         source: str | None = None,
         source_ref: str | None = None,
         pinned: bool | None = None,
+        correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
         chunks=None,
     ) -> NoteRecord | None:
@@ -87,6 +90,7 @@ class FakeNotesRepository:
                 "source": source if source is not None else self.created.source,
                 "source_ref": source_ref if source_ref is not None else self.created.source_ref,
                 "pinned": pinned if pinned is not None else self.created.pinned,
+                "correlation_id": correlation_id if correlation_id is not None else self.created.correlation_id,
                 "metatags": metatags if metatags is not None else self.created.metatags,
             }
         )
@@ -177,6 +181,7 @@ class SearchPipelineRepository(FakeNotesRepository):
             id=NOTE_ID,
             project="repo-a",
             metatags={},
+            correlation_id=uuid7_str(),
             title="Alpha note",
             body="alpha body content",
             source="cli",
@@ -191,6 +196,7 @@ class SearchPipelineRepository(FakeNotesRepository):
             id=NOTE_OTHER_ID,
             project="repo-a",
             metatags={},
+            correlation_id=uuid7_str(),
             title="Beta note",
             body="beta body content",
             source="cli",
@@ -303,6 +309,7 @@ class NotesServiceTest(unittest.TestCase):
             id=NOTE_ID,
             project="repo-a",
             metatags={},
+            correlation_id=uuid7_str(),
             title="First note",
             body="first body",
             source="cli",
@@ -317,6 +324,7 @@ class NotesServiceTest(unittest.TestCase):
             id=NOTE_OTHER_ID,
             project="repo-a",
             metatags={},
+            correlation_id=uuid7_str(),
             title="Second note",
             body="second body",
             source="cli",

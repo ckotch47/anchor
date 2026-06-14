@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from anchor.adapters.filesystem_config_repository import FileSystemConfigRepository
 from anchor.adapters.sqlite_files_repository import SqliteFilesRepository
 from anchor.adapters.sqlite_history_repository import SqliteHistoryRepository
+from anchor.adapters.sqlite_links_repository import SqliteLinksRepository
 from anchor.adapters.sqlite_maintenance_repository import SqliteMaintenanceRepository
 from anchor.adapters.sqlite_migration_repository import SqliteMigrationRepository
 from anchor.adapters.sqlite_notes_repository import SqliteNotesRepository
@@ -14,6 +15,7 @@ from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.files.chunking import FileChunkingService
 from anchor.application.files.service import FilesService
 from anchor.application.history.service import HistoryService
+from anchor.application.links.service import DocumentLinksService
 from anchor.application.notes.service import NotesService
 from anchor.application.retrieval.document_chunking import DocumentChunkingService
 from anchor.application.retrieval.rerank_provider_service import OpenAICompatibleRerankProvider
@@ -22,6 +24,7 @@ from anchor.application.retrieval.search_service import SearchService
 from anchor.application.system.config_service import ConfigService
 from anchor.application.system.health_service import HealthService
 from anchor.application.system.maintenance_service import MaintenanceService
+from anchor.application.system.metadata_service import MetadataSchemaService
 from anchor.application.system.migration_service import MigrationService
 from anchor.application.tasks.service import TasksService
 from anchor.config import AppConfig, default_database_path
@@ -41,6 +44,7 @@ class Container:
     tasks_service: TasksService
     files_service: FilesService
     search_service: SearchService
+    links_service: DocumentLinksService
 
 
 def build_container(profile: str | None = None, auto_migrate: bool = True) -> Container:
@@ -70,12 +74,14 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
             provider=rerank_provider,
             model=config.provider.rerank_model,
         )
+    metadata_service = MetadataSchemaService(config.metadata)
     notes_service = NotesService(
         repository=SqliteNotesRepository(database_path=database_path, vector_dimension=config.vector.dimension),
         chunking_service=DocumentChunkingService(),
         project=config.runtime.default_project,
         embedding_service=embedding_service,
         rerank_service=rerank_service,
+        metadata_service=metadata_service,
         budget_tokens=config.runtime.default_budget_tokens,
     )
     history_service = HistoryService(
@@ -84,11 +90,13 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         project=config.runtime.default_project,
         embedding_service=embedding_service,
         rerank_service=rerank_service,
+        metadata_service=metadata_service,
         budget_tokens=config.runtime.default_budget_tokens,
     )
     tasks_service = TasksService(
         repository=SqliteTasksRepository(database_path=database_path),
         project=config.runtime.default_project,
+        metadata_service=metadata_service,
         budget_tokens=config.runtime.default_budget_tokens,
     )
     files_service = FilesService(
@@ -97,12 +105,17 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         project=config.runtime.default_project,
         embedding_service=embedding_service,
         rerank_service=rerank_service,
+        metadata_service=metadata_service,
         roots=config.filesystem.roots,
         ignore_patterns=config.filesystem.ignore_patterns,
         max_file_size=config.filesystem.max_file_size,
         chunk_size=config.vector.chunk_size,
         chunk_overlap=config.vector.chunk_overlap,
         budget_tokens=config.runtime.default_budget_tokens,
+    )
+    links_service = DocumentLinksService(
+        repository=SqliteLinksRepository(database_path=database_path),
+        config=config.links,
     )
     search_service = SearchService(
         notes_service=notes_service,
@@ -126,4 +139,5 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         tasks_service=tasks_service,
         files_service=files_service,
         search_service=search_service,
+        links_service=links_service,
     )

@@ -9,6 +9,7 @@ class NoteRecord(BaseModel):
     id: str
     project: str
     metatags: dict[str, Any]
+    correlation_id: str
     title: str
     body: str
     source: str

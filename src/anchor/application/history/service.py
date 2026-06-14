@@ -18,6 +18,7 @@ from anchor.application.retrieval.compact_items import compact_history_item
 from anchor.application.retrieval.document_chunking import DocumentChunkingService, count_tokens
 from anchor.application.retrieval.rerank_service import RerankService
 from anchor.application.retrieval.search_scoring import combine_search_scores
+from anchor.application.system.metadata_service import MetadataSchemaService
 
 
 class HistoryService:
@@ -28,6 +29,7 @@ class HistoryService:
         project: str,
         embedding_service: EmbeddingService | None = None,
         rerank_service: RerankService | None = None,
+        metadata_service: MetadataSchemaService | None = None,
         budget_tokens: int = 800,
     ) -> None:
         self._repository = repository
@@ -35,6 +37,7 @@ class HistoryService:
         self._project = project
         self._embedding_service = embedding_service
         self._rerank_service = rerank_service
+        self._metadata_service = metadata_service
         self._budget_tokens = budget_tokens
 
     def append(
@@ -55,6 +58,7 @@ class HistoryService:
             resolved_correlation_id = correlation_id
         else:
             resolved_correlation_id = uuid7_str()
+        self._validate_metatags("history", metatags or {})
         chunks = self._chunking_service.chunk_note(title=entry_type, body=payload)
         result = self._repository.append(
             entry_type=entry_type,
@@ -90,6 +94,8 @@ class HistoryService:
         if all(value is None for value in (entry_type, payload, actor, correlation_id, metatags)):
             raise ValueError("update requires at least one field")
         resolved_project = project or self._project
+        if metatags is not None:
+            self._validate_metatags("history", metatags)
         chunks = None
         if entry_type is not None or payload is not None:
             current = self.get(history_id, project=resolved_project)
@@ -163,6 +169,11 @@ class HistoryService:
     def _require_non_empty(value: str, field: str) -> None:
         if not value.strip():
             raise ValueError(f"{field} must not be empty")
+
+    def _validate_metatags(self, entity_type: str, metatags: dict[str, object]) -> None:
+        if self._metadata_service is None:
+            return
+        self._metadata_service.validate(entity_type, metatags)
 
     def _queue_embeddings(self, document_id: str) -> None:
         if self._embedding_service is None or not hasattr(self._repository, "enqueue_embedding_index"):

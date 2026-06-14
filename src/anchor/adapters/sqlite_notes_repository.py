@@ -35,21 +35,35 @@ class SqliteNotesRepository(SqliteRepositoryBase):
         source_ref: str = "",
         pinned: bool = False,
         project: str,
+        correlation_id: str = "",
         metatags: dict[str, object] | None = None,
         chunks: list[DocumentChunkDraft] | None = None,
     ) -> NoteRecord:
         note_id = uuid7_str()
         now = utc_now_iso()
         serialized_metatags = self._serialize_metatags(metatags or {})
+        resolved_correlation_id = correlation_id or uuid7_str()
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO documents (
-                    id, project, metatags, document_type, title, body, source, source_ref, created_at, updated_at, deleted_at
+                    id, project, metatags, correlation_id, document_type, title, body, source, source_ref, created_at, updated_at, deleted_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                 """,
-                (note_id, project, serialized_metatags, "note", title, body, source, source_ref, now, now),
+                (
+                    note_id,
+                    project,
+                    serialized_metatags,
+                    resolved_correlation_id,
+                    "note",
+                    title,
+                    body,
+                    source,
+                    source_ref,
+                    now,
+                    now,
+                ),
             )
             connection.execute(
                 """
@@ -84,6 +98,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
         source: str | None = None,
         source_ref: str | None = None,
         pinned: bool | None = None,
+        correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
         chunks: list[DocumentChunkDraft] | None = None,
     ) -> NoteRecord | None:
@@ -95,6 +110,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
         updated_source = source if source is not None else current.source
         updated_source_ref = source_ref if source_ref is not None else current.source_ref
         updated_pinned = current.pinned if pinned is None else pinned
+        updated_correlation_id = correlation_id if correlation_id is not None else current.correlation_id
         updated_metatags = metatags if metatags is not None else current.metatags
         serialized_metatags = self._serialize_metatags(updated_metatags)
         now = utc_now_iso()
@@ -102,7 +118,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
             connection.execute(
                 """
                 UPDATE documents
-                SET title = ?, body = ?, source = ?, source_ref = ?, metatags = ?, updated_at = ?
+                SET title = ?, body = ?, source = ?, source_ref = ?, metatags = ?, correlation_id = ?, updated_at = ?
                 WHERE id = ? AND project = ? AND document_type = 'note' AND deleted_at IS NULL
                 """,
                 (
@@ -111,6 +127,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                     updated_source,
                     updated_source_ref,
                     serialized_metatags,
+                    updated_correlation_id,
                     now,
                     note_id,
                     project,
@@ -236,6 +253,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                     d.id,
                     d.project,
                     d.metatags,
+                    d.correlation_id,
                     d.title,
                     d.body,
                     d.source,
@@ -267,6 +285,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                     d.id,
                     d.project,
                     d.metatags,
+                    d.correlation_id,
                     d.title,
                     d.body,
                     d.source,
@@ -424,6 +443,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                     d.id,
                     d.project,
                     d.metatags,
+                    d.correlation_id,
                     d.title,
                     d.body,
                     d.source,
@@ -472,6 +492,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                         d.id,
                         d.project,
                         d.metatags,
+                        d.correlation_id,
                         d.title,
                         d.body,
                         d.source,
@@ -524,6 +545,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                     d.id,
                     d.project,
                     d.metatags,
+                    d.correlation_id,
                     d.title,
                     d.body,
                     d.source,
@@ -574,6 +596,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
             id=str(row["id"]),
             project=str(row["project"]),
             metatags=self._deserialize_metatags(row["metatags"]),
+            correlation_id=str(row["correlation_id"]),
             title=str(row["title"]),
             body=str(row["body"]),
             source=str(row["source"]),

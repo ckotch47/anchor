@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -20,6 +21,35 @@ class ProviderConfig(BaseModel):
     api_key_env: str = "OPENAI_API_KEY"
     embedding_model: str = "text-embedding-3-small"
     rerank_model: str = "gpt-5.5"
+
+
+class MetadataFieldConfig(BaseModel):
+    type: Literal["string", "integer", "number", "boolean", "object", "array"] = "string"
+    required: bool = False
+
+
+class MetadataEntityConfig(BaseModel):
+    allow_extra: bool = True
+    fields: dict[str, MetadataFieldConfig] = Field(default_factory=dict)
+
+
+class MetadataConfig(BaseModel):
+    enabled: bool = True
+    entities: dict[str, MetadataEntityConfig] = Field(default_factory=dict)
+
+
+class LinksConfig(BaseModel):
+    relation_types: list[str] = Field(
+        default_factory=lambda: [
+            "references",
+            "blocks",
+            "duplicates",
+            "implements",
+            "related",
+            "caused_by",
+            "derived_from",
+        ]
+    )
 
 
 class VectorConfig(BaseModel):
@@ -53,6 +83,8 @@ class ProfileConfig(BaseModel):
 class AppConfig(BaseModel):
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
+    metadata: MetadataConfig = Field(default_factory=MetadataConfig)
+    links: LinksConfig = Field(default_factory=LinksConfig)
     vector: VectorConfig = Field(default_factory=VectorConfig)
     filesystem: FilesystemConfig = Field(default_factory=FilesystemConfig)
     profiles: dict[str, ProfileConfig] = Field(default_factory=dict)

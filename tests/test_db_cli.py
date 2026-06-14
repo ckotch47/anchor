@@ -25,7 +25,7 @@ class DbCliTest(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["command"], "db.migrate")
         self.assertEqual(payload["data"]["database_path"], str(db_path))
-        self.assertEqual(payload["data"]["current_version"], 6)
+        self.assertEqual(payload["data"]["current_version"], 7)
         self.assertIn("checkpoint", payload["data"])
         self.assertNotIn("profile", payload["meta"])
 

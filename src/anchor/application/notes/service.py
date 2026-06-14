@@ -5,6 +5,7 @@ import json
 from collections import OrderedDict
 from time import monotonic
 
+from anchor.adapters.sqlite_ids import ensure_uuid7_str, uuid7_str
 from anchor.adapters.sqlite_notes_repository import SqliteNotesRepository
 from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.notes.models import (
@@ -18,6 +19,7 @@ from anchor.application.retrieval.compact_items import compact_note_list_item, c
 from anchor.application.retrieval.document_chunking import DocumentChunkingService, count_tokens
 from anchor.application.retrieval.rerank_service import RerankService
 from anchor.application.retrieval.search_scoring import combine_search_scores
+from anchor.application.system.metadata_service import MetadataSchemaService
 
 
 class NotesService:
@@ -28,6 +30,7 @@ class NotesService:
         project: str,
         embedding_service: EmbeddingService | None = None,
         rerank_service: RerankService | None = None,
+        metadata_service: MetadataSchemaService | None = None,
         budget_tokens: int = 800,
     ) -> None:
         self._repository = repository
@@ -35,6 +38,7 @@ class NotesService:
         self._project = project
         self._embedding_service = embedding_service
         self._rerank_service = rerank_service
+        self._metadata_service = metadata_service
         self._budget_tokens = budget_tokens
 
     def add(
@@ -46,11 +50,14 @@ class NotesService:
         source_ref: str = "",
         pinned: bool = False,
         project: str | None = None,
+        correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
     ) -> NoteRecord:
         self._require_non_empty(title, "title")
         self._require_non_empty(body, "body")
         resolved_project = project or self._project
+        resolved_correlation_id = self._resolve_correlation_id(correlation_id)
+        self._validate_metatags("notes", metatags or {})
         chunks = self._chunking_service.chunk_note(title=title, body=body)
         result = self._repository.create(
             title=title,
@@ -59,6 +66,7 @@ class NotesService:
             source_ref=source_ref,
             pinned=pinned,
             project=resolved_project,
+            correlation_id=resolved_correlation_id,
             metatags=metatags or {},
             chunks=chunks,
         )
@@ -76,6 +84,7 @@ class NotesService:
         source_ref: str | None = None,
         pinned: bool | None = None,
         project: str | None = None,
+        correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
     ) -> NoteRecord:
         self._require_non_empty(note_id, "id")
@@ -83,9 +92,13 @@ class NotesService:
             self._require_non_empty(title, "title")
         if body is not None:
             self._require_non_empty(body, "body")
-        if all(value is None for value in (title, body, source, source_ref, pinned, metatags)):
+        if all(value is None for value in (title, body, source, source_ref, pinned, correlation_id, metatags)):
             raise ValueError("update requires at least one field")
         resolved_project = project or self._project
+        if correlation_id is not None:
+            self._validate_correlation_id(correlation_id)
+        if metatags is not None:
+            self._validate_metatags("notes", metatags)
         chunks = None
         if title is not None or body is not None:
             current = self.get(note_id, project=resolved_project)
@@ -100,6 +113,7 @@ class NotesService:
             source=source,
             source_ref=source_ref,
             pinned=pinned,
+            correlation_id=correlation_id,
             metatags=metatags,
             chunks=chunks,
         )
@@ -191,6 +205,21 @@ class NotesService:
     def _require_non_empty(value: str, field: str) -> None:
         if not value.strip():
             raise ValueError(f"{field} must not be empty")
+
+    def _resolve_correlation_id(self, correlation_id: str | None) -> str:
+        if correlation_id is None or not correlation_id.strip():
+            return uuid7_str()
+        self._validate_correlation_id(correlation_id)
+        return correlation_id
+
+    @staticmethod
+    def _validate_correlation_id(correlation_id: str) -> None:
+        ensure_uuid7_str(correlation_id, "correlation_id")
+
+    def _validate_metatags(self, entity_type: str, metatags: dict[str, object]) -> None:
+        if self._metadata_service is None:
+            return
+        self._metadata_service.validate(entity_type, metatags)
 
     def _queue_embeddings(self, document_id: str) -> None:
         if self._embedding_service is None or not hasattr(self._repository, "enqueue_embedding_index"):

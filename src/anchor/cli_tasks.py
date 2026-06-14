@@ -24,6 +24,7 @@ def tasks_add(
     parent_document_id: Annotated[str | None, typer.Option("--parent-id")] = None,
     blocked_by_document_id: Annotated[str | None, typer.Option("--blocked-by-id")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
+    correlation_id: Annotated[str | None, typer.Option("--correlation-id")] = None,
     metatags: Annotated[str | None, typer.Option("--metatags")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
@@ -36,6 +37,7 @@ def tasks_add(
             source=source,
             source_ref=source_ref,
             project=resolved_project,
+            correlation_id=correlation_id,
             metatags=parse_metatags(metatags),
             task_kind=task_kind,
             priority=priority,
@@ -74,6 +76,7 @@ def tasks_update(
     parent_document_id: Annotated[str | None, typer.Option("--parent-id")] = None,
     blocked_by_document_id: Annotated[str | None, typer.Option("--blocked-by-id")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
+    correlation_id: Annotated[str | None, typer.Option("--correlation-id")] = None,
     metatags: Annotated[str | None, typer.Option("--metatags")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
@@ -87,6 +90,7 @@ def tasks_update(
             source=source,
             source_ref=source_ref,
             project=resolved_project,
+            correlation_id=correlation_id,
             metatags=None if metatags is None else parse_metatags(metatags),
             task_kind=task_kind,
             priority=priority,

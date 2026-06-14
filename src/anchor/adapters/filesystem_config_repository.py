@@ -74,6 +74,10 @@ class FileSystemConfigRepository:
         lines.append("")
         lines.extend(self._serialize_section("provider", config.provider.model_dump()))
         lines.append("")
+        lines.extend(self._serialize_metadata_section(config))
+        lines.append("")
+        lines.extend(self._serialize_section("links", config.links.model_dump()))
+        lines.append("")
         lines.extend(self._serialize_section("vector", config.vector.model_dump()))
         lines.append("")
         lines.extend(self._serialize_section("filesystem", config.filesystem.model_dump()))
@@ -86,6 +90,30 @@ class FileSystemConfigRepository:
             if lines and lines[-1] == "":
                 lines.pop()
         return "\n".join(line for line in lines if line is not None).rstrip() + "\n"
+
+    def _serialize_metadata_section(self, config: AppConfig) -> list[str]:
+        lines = ["[metadata]"]
+        lines.append(f"enabled = {self._format_value(config.metadata.enabled)}")
+        if config.metadata.entities:
+            lines.append("")
+            for entity_name in sorted(config.metadata.entities):
+                entity = config.metadata.entities[entity_name]
+                lines.append(f"[metadata.entities.{entity_name}]")
+                lines.append(f"allow_extra = {self._format_value(entity.allow_extra)}")
+                if entity.fields:
+                    lines.append("")
+                    for field_name in sorted(entity.fields):
+                        field = entity.fields[field_name]
+                        lines.append(f"[metadata.entities.{entity_name}.fields.{field_name}]")
+                        lines.append(f"type = {self._format_value(field.type)}")
+                        lines.append(f"required = {self._format_value(field.required)}")
+                        lines.append("")
+                    if lines and lines[-1] == "":
+                        lines.pop()
+                lines.append("")
+            if lines and lines[-1] == "":
+                lines.pop()
+        return lines
 
     def _serialize_section(self, name: str, data: dict[str, Any]) -> list[str]:
         lines = [f"[{name}]"]

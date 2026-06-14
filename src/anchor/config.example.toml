@@ -13,6 +13,33 @@ api_key_env = "OPENAI_API_KEY"
 embedding_model = "text-embedding-3-small"
 rerank_model = "gpt-5.5"
 
+[metadata]
+enabled = true
+
+[metadata.entities.notes]
+allow_extra = true
+
+[metadata.entities.notes.fields.topic]
+type = "string"
+required = false
+
+[metadata.entities.tasks]
+allow_extra = true
+
+[metadata.entities.tasks.fields.priority]
+type = "integer"
+required = false
+
+[metadata.entities.history]
+allow_extra = true
+
+[metadata.entities.history.fields.correlation_id]
+type = "string"
+required = false
+
+[links]
+relation_types = ["references", "blocks", "duplicates", "implements", "related", "caused_by", "derived_from"]
+
 [vector]
 dimension = 1536
 distance = "cosine"
