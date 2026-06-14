@@ -118,6 +118,7 @@ def tasks_update(
 def tasks_list(
     limit: Annotated[int, typer.Option("--limit")] = 20,
     project: Annotated[str | None, typer.Option("--project")] = None,
+    view: Annotated[str | None, typer.Option("--view")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
     try:
@@ -130,6 +131,7 @@ def tasks_list(
                     "tasks.list",
                     {"count": result.count, "tasks": [task.model_dump() for task in result.tasks]},
                     container,
+                    view=view,
                     extra_meta={"project": resolved_project},
                 ),
                 ensure_ascii=False,
@@ -147,6 +149,7 @@ def tasks_search(
     query: Annotated[str, typer.Option("--query")],
     limit: Annotated[int, typer.Option("--limit")] = 20,
     project: Annotated[str | None, typer.Option("--project")] = None,
+    view: Annotated[str | None, typer.Option("--view")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
     try:
@@ -163,6 +166,7 @@ def tasks_search(
                         "results": [hit.model_dump() for hit in result.results],
                     },
                     container,
+                    view=view,
                     extra_meta={"project": resolved_project},
                 ),
                 ensure_ascii=False,

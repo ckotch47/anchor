@@ -3,25 +3,25 @@ from __future__ import annotations
 import json
 from collections import OrderedDict
 
-from anchor.adapters.sqlite_notes_repository import SqliteNotesRepository
+from anchor.adapters.sqlite_history_repository import SqliteHistoryRepository
 from anchor.application.embeddings.service import EmbeddingService
-from anchor.application.notes.models import (
-    NoteRecord,
-    NotesListResult,
-    NotesSearchCandidate,
-    NotesSearchHit,
-    NotesSearchResult,
+from anchor.application.history.models import (
+    HistoryListItem,
+    HistoryRecord,
+    HistorySearchCandidate,
+    HistorySearchHit,
+    HistorySearchResult,
 )
-from anchor.application.retrieval.compact_items import compact_note_list_item, compact_note_search_item
+from anchor.application.retrieval.compact_items import compact_history_item
 from anchor.application.retrieval.document_chunking import DocumentChunkingService, count_tokens
 from anchor.application.retrieval.rerank_service import RerankService
 from anchor.application.retrieval.search_scoring import combine_search_scores
 
 
-class NotesService:
+class HistoryService:
     def __init__(
         self,
-        repository: SqliteNotesRepository,
+        repository: SqliteHistoryRepository,
         chunking_service: DocumentChunkingService,
         project: str,
         embedding_service: EmbeddingService | None = None,
@@ -35,27 +35,25 @@ class NotesService:
         self._rerank_service = rerank_service
         self._budget_tokens = budget_tokens
 
-    def add(
+    def append(
         self,
         *,
-        title: str,
-        body: str,
-        source: str = "cli",
-        source_ref: str = "",
-        pinned: bool = False,
+        entry_type: str,
+        payload: str,
+        actor: str = "agent",
+        correlation_id: str = "",
         project: str | None = None,
         metatags: dict[str, object] | None = None,
-    ) -> NoteRecord:
-        self._require_non_empty(title, "title")
-        self._require_non_empty(body, "body")
+    ) -> HistoryRecord:
+        self._require_non_empty(entry_type, "entry_type")
+        self._require_non_empty(payload, "payload")
         resolved_project = project or self._project
-        chunks = self._chunking_service.chunk_note(title=title, body=body)
-        result = self._repository.create(
-            title=title,
-            body=body,
-            source=source,
-            source_ref=source_ref,
-            pinned=pinned,
+        chunks = self._chunking_service.chunk_note(title=entry_type, body=payload)
+        result = self._repository.append(
+            entry_type=entry_type,
+            payload=payload,
+            actor=actor,
+            correlation_id=correlation_id,
             project=resolved_project,
             metatags=metatags or {},
             chunks=chunks,
@@ -65,71 +63,50 @@ class NotesService:
 
     def update(
         self,
-        note_id: str,
+        history_id: str,
         *,
-        title: str | None = None,
-        body: str | None = None,
-        source: str | None = None,
-        source_ref: str | None = None,
-        pinned: bool | None = None,
+        entry_type: str | None = None,
+        payload: str | None = None,
+        actor: str | None = None,
+        correlation_id: str | None = None,
         project: str | None = None,
         metatags: dict[str, object] | None = None,
-    ) -> NoteRecord:
-        self._require_non_empty(note_id, "id")
-        if title is not None:
-            self._require_non_empty(title, "title")
-        if body is not None:
-            self._require_non_empty(body, "body")
-        if all(value is None for value in (title, body, source, source_ref, pinned, metatags)):
+    ) -> HistoryRecord:
+        self._require_non_empty(history_id, "id")
+        if entry_type is not None:
+            self._require_non_empty(entry_type, "entry_type")
+        if payload is not None:
+            self._require_non_empty(payload, "payload")
+        if all(value is None for value in (entry_type, payload, actor, correlation_id, metatags)):
             raise ValueError("update requires at least one field")
         resolved_project = project or self._project
         chunks = None
-        if title is not None or body is not None:
-            current = self.get(note_id, project=resolved_project)
-            updated_title = title if title is not None else current.title
-            updated_body = body if body is not None else current.body
-            chunks = self._chunking_service.chunk_note(title=updated_title, body=updated_body)
+        if entry_type is not None or payload is not None:
+            current = self.get(history_id, project=resolved_project)
+            updated_entry_type = entry_type if entry_type is not None else current.entry_type
+            updated_payload = payload if payload is not None else current.payload
+            chunks = self._chunking_service.chunk_note(title=updated_entry_type, body=updated_payload)
         result = self._repository.update(
-            note_id,
+            history_id,
             project=resolved_project,
-            title=title,
-            body=body,
-            source=source,
-            source_ref=source_ref,
-            pinned=pinned,
+            entry_type=entry_type,
+            payload=payload,
+            actor=actor,
+            correlation_id=correlation_id,
             metatags=metatags,
             chunks=chunks,
         )
         if result is None:
-            raise LookupError(f"note not found: {note_id}")
+            raise LookupError(f"history entry not found: {history_id}")
         if chunks is not None:
             self._queue_embeddings(result.id)
         return result
 
-    def list(self, limit: int = 20, *, project: str | None = None) -> NotesListResult:
-        if limit <= 0:
-            raise ValueError("limit must be greater than zero")
-        notes = self._repository.list(limit, project=project or self._project)
-        return NotesListResult(
-            count=len(notes),
-            notes=[
-                compact_note_list_item(note)
-                for note in notes
-            ],
-        )
-
-    def get(self, note_id: str, *, project: str | None = None) -> NoteRecord:
-        self._require_non_empty(note_id, "id")
-        note = self._repository.get(note_id, project=project or self._project)
-        if note is None:
-            raise LookupError(f"note not found: {note_id}")
-        return note
-
-    def delete(self, note_id: str, *, project: str | None = None) -> NoteRecord:
-        self._require_non_empty(note_id, "id")
-        deleted = self._repository.delete(note_id, project=project or self._project)
+    def delete(self, history_id: str, *, project: str | None = None) -> HistoryRecord:
+        self._require_non_empty(history_id, "id")
+        deleted = self._repository.delete(history_id, project=project or self._project)
         if deleted is None:
-            raise LookupError(f"note not found: {note_id}")
+            raise LookupError(f"history entry not found: {history_id}")
         return deleted
 
     def search(
@@ -139,7 +116,7 @@ class NotesService:
         *,
         project: str | None = None,
         budget_tokens: int | None = None,
-    ) -> NotesSearchResult:
+    ) -> HistorySearchResult:
         self._require_non_empty(query, "query")
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
@@ -148,14 +125,14 @@ class NotesService:
         candidate_limit = max(limit * 4, limit)
         candidates = self._collect_candidates(query, candidate_limit, resolved_project)
         reranked_candidates = self._rerank_candidates(query, candidates)
-        deduplicated = self._deduplicate_by_note(reranked_candidates)
+        deduplicated = self._deduplicate_by_history(reranked_candidates)
         trimmed = self._trim_to_budget(
             deduplicated,
             budget_tokens if budget_tokens is not None else self._budget_tokens,
         )
         results = [
-            NotesSearchHit(
-                note=candidate.note,
+            HistorySearchHit(
+                history=candidate.history,
                 chunk_id=candidate.chunk_id,
                 score=combine_search_scores(
                     lexical_score=candidate.lexical_score,
@@ -166,7 +143,7 @@ class NotesService:
             )
             for candidate in trimmed[:limit]
         ]
-        return NotesSearchResult(query=query, count=len(results), results=results)
+        return HistorySearchResult(query=query, count=len(results), results=results)
 
     @staticmethod
     def _require_non_empty(value: str, field: str) -> None:
@@ -211,25 +188,16 @@ class NotesService:
                 if hasattr(self._repository, "mark_embedding_index_error"):
                     self._repository.mark_embedding_index_error(document_id, last_error=str(exc))
 
-    @staticmethod
-    def _serialize_metatags(metatags: dict[str, object]) -> str:
-        return json.dumps(metatags, separators=(",", ":"), ensure_ascii=False)
-
-    def _collect_candidates(
-        self,
-        query: str,
-        limit: int,
-        project: str,
-    ) -> list[NotesSearchCandidate]:
+    def _collect_candidates(self, query: str, limit: int, project: str) -> list[HistorySearchCandidate]:
         lexical_rows = self._search_lexical_candidates(query, limit, project)
-        semantic_rows: list[NotesSearchCandidate] = []
+        semantic_rows: list[HistorySearchCandidate] = []
         if self._embedding_service is not None:
             try:
                 query_embedding = self._embedding_service.embed_texts([query]).embeddings[0].embedding
                 semantic_rows = self._search_vector_candidates(query_embedding, limit, project)
             except Exception:
                 semantic_rows = []
-        merged: OrderedDict[str, NotesSearchCandidate] = OrderedDict()
+        merged: OrderedDict[str, HistorySearchCandidate] = OrderedDict()
         for candidate in [*lexical_rows, *semantic_rows]:
             current = merged.get(candidate.chunk_id)
             if current is None:
@@ -247,68 +215,48 @@ class NotesService:
             current.token_count = max(current.token_count, candidate.token_count)
         return list(merged.values())
 
-    def _rerank_candidates(self, query: str, candidates: list[NotesSearchCandidate]) -> list[NotesSearchCandidate]:
+    def _rerank_candidates(self, query: str, candidates: list[HistorySearchCandidate]) -> list[HistorySearchCandidate]:
         if not candidates:
             return []
         if self._rerank_service is None:
             return candidates
-        try:
-            rerank_scores = self._rerank_service.rerank(
-                query,
-                [self._candidate_text(candidate) for candidate in candidates],
-            )
-        except Exception:
-            return candidates
+        rerank_scores = self._rerank_service.rerank(query, [candidate.snippet for candidate in candidates])
         for candidate, rerank_score in zip(candidates, rerank_scores, strict=True):
             candidate.rerank_score = rerank_score
         return candidates
 
-    def _deduplicate_by_note(self, candidates: list[NotesSearchCandidate]) -> list[NotesSearchCandidate]:
-        best_by_note_id: OrderedDict[str, NotesSearchCandidate] = OrderedDict()
-        for candidate in sorted(
-            candidates,
-            key=lambda item: combine_search_scores(
-                lexical_score=item.lexical_score,
-                vector_score=item.vector_score,
-                rerank_score=item.rerank_score,
-            ),
-            reverse=True,
-        ):
-            note_id = candidate.note.id
-            if note_id not in best_by_note_id:
-                best_by_note_id[note_id] = candidate
-        return list(best_by_note_id.values())
-
-    def _trim_to_budget(self, candidates: list[NotesSearchCandidate], budget_tokens: int) -> list[NotesSearchCandidate]:
-        if budget_tokens <= 0:
-            return []
-        trimmed: list[NotesSearchCandidate] = []
-        total_tokens = 0
+    def _deduplicate_by_history(self, candidates: list[HistorySearchCandidate]) -> list[HistorySearchCandidate]:
+        best_by_history: OrderedDict[str, HistorySearchCandidate] = OrderedDict()
         for candidate in candidates:
-            candidate_cost = self._estimate_candidate_tokens(candidate)
-            if trimmed and total_tokens + candidate_cost > budget_tokens:
-                break
-            trimmed.append(candidate)
-            total_tokens += candidate_cost
-        return trimmed
+            key = candidate.history.id
+            current = best_by_history.get(key)
+            score = combine_search_scores(
+                lexical_score=candidate.lexical_score,
+                vector_score=candidate.vector_score,
+                rerank_score=candidate.rerank_score,
+            )
+            if current is None:
+                best_by_history[key] = candidate
+                continue
+            current_score = combine_search_scores(
+                lexical_score=current.lexical_score,
+                vector_score=current.vector_score,
+                rerank_score=current.rerank_score,
+            )
+            if score > current_score:
+                best_by_history[key] = candidate
+        return list(best_by_history.values())
 
-    def _estimate_candidate_tokens(self, candidate: NotesSearchCandidate) -> int:
-        return max(1, candidate.token_count + count_tokens(candidate.note.title) + count_tokens(candidate.snippet))
-
-    @staticmethod
-    def _candidate_text(candidate: NotesSearchCandidate) -> str:
-        return f"{candidate.note.title}\n{candidate.snippet}".strip()
-
-    def _search_lexical_candidates(self, query: str, limit: int, project: str) -> list[NotesSearchCandidate]:
+    def _search_lexical_candidates(self, query: str, limit: int, project: str) -> list[HistorySearchCandidate]:
         if hasattr(self._repository, "search_lexical_candidates"):
             return self._repository.search_lexical_candidates(query=query, limit=limit, project=project)
         results = self._repository.search(query=query, limit=limit, project=project)
         return [
-            NotesSearchCandidate(
-                note=compact_note_search_item(result.note),
+            HistorySearchCandidate(
+                history=self._as_search_item(result.history),
                 chunk_id=result.chunk_id,
                 snippet=result.snippet,
-                token_count=count_tokens(result.snippet),
+                token_count=max(1, count_tokens(result.snippet)),
                 lexical_score=result.score,
             )
             for result in results
@@ -319,7 +267,39 @@ class NotesService:
         query_embedding: list[float],
         limit: int,
         project: str,
-    ) -> list[NotesSearchCandidate]:
+    ) -> list[HistorySearchCandidate]:
         if not hasattr(self._repository, "search_vector_candidates"):
             return []
         return self._repository.search_vector_candidates(query_embedding=query_embedding, limit=limit, project=project)
+
+    def _trim_to_budget(self, results: list[HistorySearchCandidate], budget_tokens: int) -> list[HistorySearchCandidate]:
+        if budget_tokens <= 0:
+            return []
+        trimmed: list[HistorySearchCandidate] = []
+        total_tokens = 0
+        for result in results:
+            result_cost = self._estimate_result_tokens(result)
+            if trimmed and total_tokens + result_cost > budget_tokens:
+                break
+            trimmed.append(result)
+            total_tokens += result_cost
+        return trimmed
+
+    @staticmethod
+    def _estimate_result_tokens(result: HistorySearchCandidate) -> int:
+        return max(1, count_tokens(result.history.entry_type) + count_tokens(result.history.actor) + count_tokens(result.snippet))
+
+    @staticmethod
+    def _serialize_metatags(metatags: dict[str, object]) -> str:
+        return json.dumps(metatags, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def _as_search_item(history: HistoryRecord | HistoryListItem) -> HistoryListItem:
+        return compact_history_item(history)
+
+    def get(self, history_id: str, *, project: str | None = None) -> HistoryRecord:
+        self._require_non_empty(history_id, "id")
+        history = self._repository.get(history_id, project=project or self._project)
+        if history is None:
+            raise LookupError(f"history entry not found: {history_id}")
+        return history

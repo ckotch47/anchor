@@ -6,11 +6,80 @@ from pathlib import Path
 
 from anchor.adapters.sqlite_files_repository import SqliteFilesRepository
 from anchor.adapters.sqlite_migration_repository import SqliteMigrationRepository
+from anchor.application.embeddings.models import ChunkEmbeddingRecord
+from anchor.application.embeddings.service import ChunkEmbeddingsResult
 from anchor.application.files.chunking import FileChunkingService
+from anchor.application.files.models import FileListItem, FileSearchCandidate
 from anchor.application.files.service import FilesService
 
 
 class FilesServiceTest(unittest.TestCase):
+    def test_search_uses_vector_and_rerank(self) -> None:
+        class FakeRepository:
+            def search_lexical_candidates(self, query: str, limit: int, *, project: str):
+                del query, limit, project
+                return [
+                    FileSearchCandidate(
+                        file=FileListItem(
+                            id="file_1",
+                            path="/repo/app.py",
+                            root_path="/repo",
+                            language="python",
+                            file_size=42,
+                        ),
+                        chunk_id="chunk_1",
+                        snippet="lexical snippet",
+                        token_count=2,
+                        lexical_score=0.2,
+                    )
+                ]
+
+            def search_vector_candidates(self, query_embedding: list[float], limit: int, *, project: str):
+                del query_embedding, limit, project
+                return [
+                    FileSearchCandidate(
+                        file=FileListItem(
+                            id="file_1",
+                            path="/repo/app.py",
+                            root_path="/repo",
+                            language="python",
+                            file_size=42,
+                        ),
+                        chunk_id="chunk_1",
+                        snippet="vector snippet with more detail",
+                        token_count=4,
+                        vector_score=0.9,
+                    )
+                ]
+
+        class FakeEmbeddingService:
+            def embed_texts(self, texts: list[str]) -> ChunkEmbeddingsResult:
+                del texts
+                return ChunkEmbeddingsResult(
+                    model="fake",
+                    embeddings=[ChunkEmbeddingRecord(chunk_id="text_0", model="fake", embedding=[1.0, 0.0])],
+                )
+
+        class FakeRerankService:
+            def rerank(self, query: str, texts: list[str]) -> list[float]:
+                del query, texts
+                return [0.95]
+
+        service = FilesService(
+            repository=FakeRepository(),
+            chunking_service=FileChunkingService(),
+            project="repo-a",
+            embedding_service=FakeEmbeddingService(),
+            rerank_service=FakeRerankService(),
+        )
+
+        result = service.search("deploy", project="repo-a")
+
+        self.assertEqual(result.count, 1)
+        self.assertEqual(result.results[0].file.id, "file_1")
+        self.assertGreater(result.results[0].score, 0.7)
+        self.assertEqual(result.results[0].snippet, "vector snippet with more detail")
+
     def test_index_and_search_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "repo"

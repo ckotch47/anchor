@@ -10,7 +10,7 @@ _ALLOWED_SEARCH_TYPES = {"notes", "tasks", "history", "files"}
 
 class SearchQuery(BaseModel):
     query: str
-    types: list[str] = Field(default_factory=lambda: ["notes", "tasks", "files"])
+    types: list[str] = Field(default_factory=lambda: ["notes", "tasks", "history", "files"])
     project: str
     limit: int = 20
     budget_tokens: int = 800

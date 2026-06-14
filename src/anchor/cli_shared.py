@@ -38,17 +38,27 @@ def config_payload(command: str, result: ConfigResult, container: Any) -> dict[s
     }
 
 
+def resolve_view(container: Any, view: str | None) -> str:
+    if view is None or not view.strip():
+        return container.config.runtime.default_view
+    normalized = view.strip().lower()
+    if normalized not in {"compact", "full"}:
+        raise ValueError("view must be 'compact' or 'full'")
+    return normalized
+
+
 def build_success_payload(
     command: str,
     data: dict[str, Any],
     container: Any,
     *,
+    view: str | None = None,
     include_config_path: bool = True,
     profile: str | None = None,
     extra_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     meta: dict[str, Any] = {
-        "view": container.config.runtime.default_view,
+        "view": resolve_view(container, view),
         "profile": profile or container.profile_name,
     }
     if include_config_path:

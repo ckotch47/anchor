@@ -12,11 +12,18 @@ from anchor.container import build_container
 
 def _parse_search_types(raw_types: str | None) -> list[str]:
     if raw_types is None or not raw_types.strip():
-        return ["notes", "tasks", "files"]
+        return ["notes", "tasks", "history", "files"]
     return [search_type.strip() for search_type in raw_types.split(",") if search_type.strip()]
 
 
-def _render_search_payload(result: object, container: object, resolved_project: str, explain: bool, search_types: list[str]) -> None:
+def _render_search_payload(
+    result: object,
+    container: object,
+    resolved_project: str,
+    explain: bool,
+    search_types: list[str],
+    view: str | None,
+) -> None:
     data = result.model_dump(exclude_none=True)
     if not explain and isinstance(data, dict):
         stats = data.get("stats")
@@ -28,6 +35,7 @@ def _render_search_payload(result: object, container: object, resolved_project: 
                 "search",
                 data,
                 container,
+                view=view,
                 extra_meta={"project": resolved_project, "types": search_types, "explain": explain},
             ),
             ensure_ascii=False,
@@ -42,6 +50,7 @@ def search_command(
     limit: Annotated[int, typer.Option("--limit")] = 20,
     budget_tokens: Annotated[int | None, typer.Option("--budget-tokens")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
+    view: Annotated[str | None, typer.Option("--view")] = None,
     explain: Annotated[bool, typer.Option("--explain")] = False,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
@@ -58,7 +67,7 @@ def search_command(
             explain=explain,
         )
         result = container.search_service.search(search_query)
-        _render_search_payload(result, container, resolved_project, explain, search_types)
+        _render_search_payload(result, container, resolved_project, explain, search_types, view)
     except ValueError as exc:
         emit_error("search", "INVALID_ARGS", str(exc))
     except Exception as exc:

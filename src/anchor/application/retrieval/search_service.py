@@ -5,6 +5,8 @@ from collections import OrderedDict
 
 from anchor.application.files.models import FilesSearchResult
 from anchor.application.files.service import FilesService
+from anchor.application.history.models import HistorySearchResult
+from anchor.application.history.service import HistoryService
 from anchor.application.notes.models import NotesSearchResult
 from anchor.application.notes.service import NotesService
 from anchor.application.retrieval.document_chunking import count_tokens
@@ -13,19 +15,21 @@ from anchor.application.retrieval.search_query import SearchQuery
 from anchor.application.tasks.models import TasksSearchResult
 from anchor.application.tasks.service import TasksService
 
-_SUPPORTED_TYPES = {"notes", "tasks", "files"}
+_SUPPORTED_TYPES = {"notes", "tasks", "history", "files"}
 
 
 class SearchService:
     def __init__(
         self,
         notes_service: NotesService,
+        history_service: HistoryService,
         tasks_service: TasksService,
         files_service: FilesService,
         *,
         budget_tokens: int = 800,
     ) -> None:
         self._notes_service = notes_service
+        self._history_service = history_service
         self._tasks_service = tasks_service
         self._files_service = files_service
         self._budget_tokens = budget_tokens
@@ -34,7 +38,7 @@ class SearchService:
         unsupported = [search_type for search_type in search_query.types if search_type not in _SUPPORTED_TYPES]
         if unsupported:
             raise ValueError(f"unsupported search types: {', '.join(unsupported)}")
-        requested_types = search_query.types or ["notes", "tasks"]
+        requested_types = search_query.types or ["notes", "tasks", "history", "files"]
         per_type_budgets = self._allocate_budgets(search_query.budget_tokens, requested_types, search_query.weights)
         candidate_counts: dict[str, int] = {}
         candidates: list[SearchHit] = []
@@ -58,6 +62,15 @@ class SearchService:
                 )
                 candidate_counts[search_type] = tasks_result.count
                 candidates.extend(self._tasks_hits(tasks_result, search_query.project))
+            elif search_type == "history":
+                history_result = self._history_service.search(
+                    search_query.query,
+                    limit=candidate_limit,
+                    project=search_query.project,
+                    budget_tokens=per_type_budgets[search_type],
+                )
+                candidate_counts[search_type] = history_result.count
+                candidates.extend(self._history_hits(history_result, search_query.project))
             elif search_type == "files":
                 files_result = self._files_service.search(
                     search_query.query,
@@ -105,6 +118,24 @@ class SearchService:
                 attributes={
                     "status": hit.task.status,
                     "priority": hit.task.priority,
+                },
+            )
+            for hit in result.results
+        ]
+
+    def _history_hits(self, result: HistorySearchResult, project: str) -> list[SearchHit]:
+        return [
+            SearchHit(
+                entity_type="history",
+                entity_id=hit.history.id,
+                project=hit.history.project,
+                title=f"{hit.history.entry_type} · {hit.history.actor}",
+                score=hit.score,
+                snippet=hit.snippet,
+                attributes={
+                    "entry_type": hit.history.entry_type,
+                    "actor": hit.history.actor,
+                    "correlation_id": hit.history.correlation_id,
                 },
             )
             for hit in result.results

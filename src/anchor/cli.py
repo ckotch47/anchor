@@ -6,14 +6,17 @@ from typing import Annotated, Any
 import typer
 
 from anchor.cli_files import files_app, files_index, files_search
+from anchor.cli_history import history_app, history_append, history_delete, history_search, history_update
 from anchor.cli_notes import notes_add, notes_app, notes_delete, notes_get, notes_list, notes_search, notes_update
 from anchor.cli_search import search_command
 from anchor.cli_shared import config_payload, emit_error
 from anchor.cli_tasks import tasks_add, tasks_app, tasks_delete, tasks_done, tasks_list, tasks_search, tasks_update
 from anchor.container import build_container
+from anchor.mcp_server import run_stdio
 
 app = typer.Typer(add_completion=False, help="Qatoria Anchor")
 app.add_typer(notes_app, name="notes")
+app.add_typer(history_app, name="history")
 app.add_typer(files_app, name="files")
 app.add_typer(tasks_app, name="tasks")
 app.command(name="search")(search_command)
@@ -25,6 +28,11 @@ __all__ = [
     "files_index",
     "files_search",
     "health",
+    "history_append",
+    "history_delete",
+    "history_search",
+    "history_update",
+    "mcp_command",
     "notes_add",
     "notes_delete",
     "notes_get",
@@ -162,6 +170,11 @@ def db_command(
         raise
     except Exception as exc:
         emit_error("db", "DB_MIGRATION_FAILED", str(exc))
+
+
+@app.command(name="mcp")
+def mcp_command() -> None:
+    run_stdio()
 
 
 def _handle_db_migrate(container: Any) -> None:

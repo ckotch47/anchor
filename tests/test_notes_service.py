@@ -4,7 +4,7 @@ import unittest
 
 from anchor.application.embeddings.models import ChunkEmbeddingRecord, DocumentChunkRecord
 from anchor.application.embeddings.service import EmbeddingService
-from anchor.application.notes.models import NoteRecord, NotesSearchCandidate
+from anchor.application.notes.models import NoteRecord, NoteSearchItem, NotesSearchCandidate
 from anchor.application.notes.service import NotesService
 from anchor.application.retrieval.document_chunking import DocumentChunkingService
 from anchor.application.retrieval.rerank_service import RerankService
@@ -187,14 +187,26 @@ class SearchPipelineRepository(FakeNotesRepository):
         del query, project
         return [
             NotesSearchCandidate(
-                note=self.note_one,
+                note=NoteSearchItem(
+                    id=self.note_one.id,
+                    project=self.note_one.project,
+                    title=self.note_one.title,
+                    pinned=self.note_one.pinned,
+                    created_at=self.note_one.created_at,
+                ),
                 chunk_id="chunk_lex_1",
                 snippet="alpha lexical snippet with many words to consume budget",
                 token_count=8,
                 lexical_score=0.95,
             ),
             NotesSearchCandidate(
-                note=self.note_two,
+                note=NoteSearchItem(
+                    id=self.note_two.id,
+                    project=self.note_two.project,
+                    title=self.note_two.title,
+                    pinned=self.note_two.pinned,
+                    created_at=self.note_two.created_at,
+                ),
                 chunk_id="chunk_lex_2",
                 snippet="beta lexical snippet that will be trimmed later",
                 token_count=8,
@@ -206,14 +218,26 @@ class SearchPipelineRepository(FakeNotesRepository):
         del query_embedding, project
         return [
             NotesSearchCandidate(
-                note=self.note_one,
+                note=NoteSearchItem(
+                    id=self.note_one.id,
+                    project=self.note_one.project,
+                    title=self.note_one.title,
+                    pinned=self.note_one.pinned,
+                    created_at=self.note_one.created_at,
+                ),
                 chunk_id="chunk_vec_1",
                 snippet="alpha vector snippet with many words to consume budget",
                 token_count=8,
                 vector_score=0.99,
             ),
             NotesSearchCandidate(
-                note=self.note_two,
+                note=NoteSearchItem(
+                    id=self.note_two.id,
+                    project=self.note_two.project,
+                    title=self.note_two.title,
+                    pinned=self.note_two.pinned,
+                    created_at=self.note_two.created_at,
+                ),
                 chunk_id="chunk_vec_2",
                 snippet="beta vector snippet that will be trimmed later",
                 token_count=8,

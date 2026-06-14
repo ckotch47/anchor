@@ -3,7 +3,8 @@ from __future__ import annotations
 import unittest
 
 from anchor.application.files.models import FileListItem, FileSearchHit, FilesSearchResult
-from anchor.application.notes.models import NoteRecord, NotesSearchHit, NotesSearchResult
+from anchor.application.history.models import HistoryListItem, HistorySearchHit, HistorySearchResult
+from anchor.application.notes.models import NoteSearchItem, NotesSearchHit, NotesSearchResult
 from anchor.application.retrieval.search_query import SearchQuery
 from anchor.application.retrieval.search_service import SearchService
 from anchor.application.tasks.models import TaskListItem, TaskSearchHit, TasksSearchResult
@@ -19,19 +20,12 @@ class FakeNotesService:
         budget_tokens: int | None = None,
     ) -> NotesSearchResult:
         del query, limit, budget_tokens
-        note = NoteRecord(
+        note = NoteSearchItem(
             id="note_1",
             project=project or "repo-a",
-            metatags={},
             title="Deploy note",
-            body="deploy note body",
-            source="cli",
-            source_ref="",
-            note_kind="note",
             pinned=False,
-            archived_at=None,
             created_at="2026-06-13T00:00:00+00:00",
-            updated_at="2026-06-13T00:00:00+00:00",
         )
         return NotesSearchResult(
             query="deploy",
@@ -101,30 +95,69 @@ class FakeFilesService:
         )
 
 
+class FakeHistoryService:
+    def search(
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        project: str | None = None,
+        budget_tokens: int | None = None,
+    ) -> HistorySearchResult:
+        del query, limit, budget_tokens
+        history = HistoryListItem(
+            id="history_1",
+            project=project or "repo-a",
+            entry_type="deploy_log",
+            actor="agent",
+            correlation_id="corr-1",
+            created_at="2026-06-13T00:00:00+00:00",
+        )
+        return HistorySearchResult(
+            query="deploy",
+            count=1,
+            results=[
+                HistorySearchHit(
+                    history=history,
+                    chunk_id="chunk_4",
+                    score=0.8,
+                    snippet="deploy history snippet",
+                )
+            ],
+        )
+
+
 class SearchServiceTest(unittest.TestCase):
-    def test_search_combines_notes_and_tasks(self) -> None:
-        service = SearchService(FakeNotesService(), FakeTasksService(), FakeFilesService(), budget_tokens=100)
+    def test_search_combines_notes_tasks_history_and_files(self) -> None:
+        service = SearchService(
+            FakeNotesService(),
+            FakeHistoryService(),
+            FakeTasksService(),
+            FakeFilesService(),
+            budget_tokens=100,
+        )
 
         result = service.search(
             SearchQuery(
                 query="deploy",
                 project="repo-a",
-                types=["notes", "tasks", "files"],
+                types=["notes", "tasks", "history", "files"],
                 explain=True,
                 budget_tokens=100,
             )
         )
 
-        self.assertEqual(result.count, 3)
-        self.assertEqual([hit.entity_type for hit in result.results], ["notes", "tasks", "files"])
+        self.assertEqual(result.count, 4)
+        self.assertEqual([hit.entity_type for hit in result.results], ["notes", "tasks", "history", "files"])
         self.assertIsNotNone(result.stats)
-        self.assertEqual(result.stats.returned_count, 3)
+        self.assertEqual(result.stats.returned_count, 4)
         self.assertEqual(result.stats.candidate_counts["notes"], 1)
         self.assertEqual(result.stats.candidate_counts["tasks"], 1)
+        self.assertEqual(result.stats.candidate_counts["history"], 1)
         self.assertEqual(result.stats.candidate_counts["files"], 1)
 
     def test_search_rejects_unsupported_types(self) -> None:
-        service = SearchService(FakeNotesService(), FakeTasksService(), FakeFilesService())
+        service = SearchService(FakeNotesService(), FakeHistoryService(), FakeTasksService(), FakeFilesService())
 
         with self.assertRaises(ValueError):
-            service.search(SearchQuery(query="deploy", project="repo-a", types=["history"], budget_tokens=100))
+            service.search(SearchQuery(query="deploy", project="repo-a", types=["unknown"], budget_tokens=100))

@@ -7,12 +7,22 @@ from pathlib import Path
 
 from anchor.adapters.sqlite_repository import SqliteRepositoryBase
 from anchor.adapters.sqlite_support import utc_now_iso
+from anchor.application.embeddings.models import ChunkEmbeddingRecord
 from anchor.application.files.chunking import FileChunkDraft
-from anchor.application.files.models import FileListItem, FileSearchHit, IndexedFileRecord
+from anchor.application.files.models import (
+    FileChunkRecord,
+    FileListItem,
+    FileSearchCandidate,
+    FileSearchHit,
+    IndexedFileRecord,
+)
+from anchor.application.retrieval.compact_items import compact_file_item
 from anchor.application.retrieval.search_query import normalize_fts5_query
+from anchor.application.retrieval.search_scoring import combine_search_scores, cosine_similarity
 
 
 class SqliteFilesRepository(SqliteRepositoryBase):
+    EMBEDDING_INDEX_TYPE = "file_embeddings"
     def __init__(self, database_path: Path | None = None) -> None:
         super().__init__(database_path=database_path)
 
@@ -86,6 +96,17 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                     now,
                 ),
             )
+            connection.execute(
+                """
+                DELETE FROM chunk_embeddings
+                WHERE chunk_id IN (
+                    SELECT id
+                    FROM file_chunks
+                    WHERE document_id = ?
+                )
+                """,
+                (document_id,),
+            )
             connection.execute("DELETE FROM file_chunks_fts WHERE document_id = ?", (document_id,))
             connection.execute("DELETE FROM file_chunks WHERE document_id = ?", (document_id,))
             for chunk in chunks:
@@ -158,6 +179,17 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                 """,
                 (now, now, document_id, project),
             )
+            connection.execute(
+                """
+                DELETE FROM chunk_embeddings
+                WHERE chunk_id IN (
+                    SELECT id
+                    FROM file_chunks
+                    WHERE document_id = ?
+                )
+                """,
+                (document_id,),
+            )
             connection.execute("DELETE FROM file_chunks_fts WHERE document_id = ?", (document_id,))
             connection.execute("DELETE FROM file_chunks WHERE document_id = ?", (document_id,))
             connection.commit()
@@ -207,25 +239,139 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
 
+    def list_chunks(self, document_id: str) -> list[FileChunkRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, document_id, project, path, root_path, language, chunk_index, start_line, end_line,
+                       chunk_text, token_count, created_at
+                FROM file_chunks
+                WHERE document_id = ?
+                ORDER BY chunk_index ASC, id ASC
+                """,
+                (document_id,),
+            ).fetchall()
+        return [self._row_to_chunk_record(row) for row in rows]
+
+    def store_chunk_embeddings(
+        self,
+        embeddings: list[ChunkEmbeddingRecord],
+        *,
+        project: str,
+        metatags: str,
+        created_at: str,
+    ) -> None:
+        with self._connect() as connection:
+            for record in embeddings:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO chunk_embeddings (chunk_id, project, metatags, model, embedding, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record.chunk_id,
+                        project,
+                        metatags,
+                        record.model,
+                        self._serialize_embedding(record.embedding),
+                        created_at,
+                    ),
+                )
+            connection.commit()
+
+    def enqueue_embedding_index(self, document_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO index_states (
+                    entity_type, entity_id, index_type, state, indexed_at, stale_since, last_error
+                )
+                VALUES (?, ?, ?, 'pending', NULL, ?, NULL)
+                ON CONFLICT(entity_type, entity_id, index_type)
+                DO UPDATE SET
+                    state = 'pending',
+                    stale_since = excluded.stale_since,
+                    last_error = NULL
+                """,
+                ("document", document_id, self.EMBEDDING_INDEX_TYPE, utc_now_iso()),
+            )
+            connection.commit()
+
+    def pending_embedding_documents(self, *, project: str, limit: int = 8) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT entity_id
+                FROM index_states
+                WHERE entity_type = 'document'
+                  AND index_type = ?
+                  AND state IN ('pending', 'stale')
+                  AND entity_id IN (
+                      SELECT id
+                      FROM documents
+                      WHERE project = ? AND deleted_at IS NULL AND document_type = 'file'
+                  )
+                ORDER BY COALESCE(stale_since, indexed_at) ASC, entity_id ASC
+                LIMIT ?
+                """,
+                (self.EMBEDDING_INDEX_TYPE, project, limit),
+            ).fetchall()
+        return [str(row["entity_id"]) for row in rows]
+
+    def mark_embedding_index_ready(self, document_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO index_states (
+                    entity_type, entity_id, index_type, state, indexed_at, stale_since, last_error
+                )
+                VALUES (?, ?, ?, 'ready', ?, NULL, NULL)
+                ON CONFLICT(entity_type, entity_id, index_type)
+                DO UPDATE SET
+                    state = 'ready',
+                    indexed_at = excluded.indexed_at,
+                    stale_since = NULL,
+                    last_error = NULL
+                """,
+                ("document", document_id, self.EMBEDDING_INDEX_TYPE, utc_now_iso()),
+            )
+            connection.commit()
+
+    def mark_embedding_index_error(self, document_id: str, *, last_error: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO index_states (
+                    entity_type, entity_id, index_type, state, indexed_at, stale_since, last_error
+                )
+                VALUES (?, ?, ?, 'error', NULL, ?, ?)
+                ON CONFLICT(entity_type, entity_id, index_type)
+                DO UPDATE SET
+                    state = 'error',
+                    stale_since = excluded.stale_since,
+                    last_error = excluded.last_error
+                """,
+                ("document", document_id, self.EMBEDDING_INDEX_TYPE, utc_now_iso(), last_error),
+            )
+            connection.commit()
+
     def search(self, query: str, limit: int, *, project: str) -> list[FileSearchHit]:
         candidates = self.search_lexical_candidates(query=query, limit=limit, project=project)
         return [
             FileSearchHit(
-                file=FileListItem(
-                    id=candidate.file.id,
-                    path=candidate.file.path,
-                    root_path=candidate.file.root_path,
-                    language=candidate.file.language,
-                    file_size=candidate.file.file_size,
-                ),
+                file=candidate.file,
                 chunk_id=candidate.chunk_id,
-                score=candidate.score,
+                score=combine_search_scores(
+                    lexical_score=candidate.lexical_score,
+                    vector_score=candidate.vector_score,
+                    rerank_score=candidate.rerank_score,
+                ),
                 snippet=candidate.snippet,
             )
-            for candidate in candidates
+            for candidate in candidates[:limit]
         ]
 
-    def search_lexical_candidates(self, query: str, limit: int, *, project: str) -> list[FileSearchHit]:
+    def search_lexical_candidates(self, query: str, limit: int, *, project: str) -> list[FileSearchCandidate]:
         match_query = normalize_fts5_query(query)
         with self._connect() as connection:
             rows = connection.execute(
@@ -261,20 +407,87 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                 ("file", match_query, "file", project, limit),
             ).fetchall()
         return [
-            FileSearchHit(
-                file=FileListItem(
-                    id=str(row["document_id"]),
-                    path=str(row["path"]),
-                    root_path=str(row["root_path"]),
-                    language=str(row["language"]),
-                    file_size=int(row["file_size"]),
+            FileSearchCandidate(
+                file=compact_file_item(
+                    FileListItem(
+                        id=str(row["document_id"]),
+                        path=str(row["path"]),
+                        root_path=str(row["root_path"]),
+                        language=str(row["language"]),
+                        file_size=int(row["file_size"]),
+                    )
                 ),
                 chunk_id=str(row["chunk_id"]),
-                score=float(row["lexical_score"]),
                 snippet=str(row["snippet"]),
+                token_count=max(1, len(str(row["snippet"]).split())),
+                lexical_score=float(row["lexical_score"]),
             )
             for row in rows
         ]
+
+    def search_vector_candidates(
+        self,
+        query_embedding: list[float],
+        limit: int,
+        *,
+        project: str,
+    ) -> list[FileSearchCandidate]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    f.document_id,
+                    f.project,
+                    f.path,
+                    f.root_path,
+                    f.language,
+                    f.file_size,
+                    f.metatags,
+                    f.created_at,
+                    f.updated_at,
+                    c.id AS chunk_id,
+                    c.chunk_text,
+                    c.token_count,
+                    ce.embedding
+                FROM chunk_embeddings AS ce
+                JOIN file_chunks AS c ON c.id = ce.chunk_id
+                JOIN indexed_files AS f ON f.document_id = c.document_id
+                JOIN documents AS d ON d.id = c.document_id
+                WHERE d.document_type = ?
+                  AND d.project = ?
+                  AND d.deleted_at IS NULL
+                """,
+                ("file", project),
+            ).fetchall()
+        candidates: list[FileSearchCandidate] = []
+        for row in rows:
+            embedding = self._deserialize_embedding(row["embedding"])
+            vector_score = cosine_similarity(query_embedding, embedding)
+            candidates.append(
+                FileSearchCandidate(
+                    file=compact_file_item(
+                        FileListItem(
+                            id=str(row["document_id"]),
+                            path=str(row["path"]),
+                            root_path=str(row["root_path"]),
+                            language=str(row["language"]),
+                            file_size=int(row["file_size"]),
+                        )
+                    ),
+                    chunk_id=str(row["chunk_id"]),
+                    snippet=self._build_snippet(str(row["chunk_text"])),
+                    token_count=int(row["token_count"]),
+                    vector_score=vector_score,
+                )
+            )
+        candidates.sort(
+            key=lambda item: combine_search_scores(
+                lexical_score=item.lexical_score,
+                vector_score=item.vector_score,
+            ),
+            reverse=True,
+        )
+        return candidates[:limit]
 
     def file_chunks_for_document(self, document_id: str) -> list[str]:
         with self._connect() as connection:
@@ -288,6 +501,11 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                 (document_id,),
             ).fetchall()
         return [str(row["chunk_text"]) for row in rows]
+
+    @staticmethod
+    def _build_snippet(chunk_text: str, max_words: int = 12) -> str:
+        words = chunk_text.split()
+        return " ".join(words[:max_words])
 
     def _row_to_record(self, row: sqlite3.Row) -> IndexedFileRecord:
         return IndexedFileRecord(
@@ -303,6 +521,22 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
             deleted_at=row["deleted_at"],
+        )
+
+    def _row_to_chunk_record(self, row: sqlite3.Row) -> FileChunkRecord:
+        return FileChunkRecord(
+            id=str(row["id"]),
+            document_id=str(row["document_id"]),
+            project=str(row["project"]),
+            path=str(row["path"]),
+            root_path=str(row["root_path"]),
+            language=str(row["language"]),
+            chunk_index=int(row["chunk_index"]),
+            start_line=int(row["start_line"]),
+            end_line=int(row["end_line"]),
+            chunk_text=str(row["chunk_text"]),
+            token_count=int(row["token_count"]),
+            created_at=str(row["created_at"]),
         )
 
     @staticmethod
@@ -322,3 +556,22 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                 return {}
             return parsed if isinstance(parsed, dict) else {}
         return {}
+
+    @staticmethod
+    def _serialize_embedding(embedding: list[float]) -> str:
+        return json.dumps(embedding, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def _deserialize_embedding(raw_value: object) -> list[float]:
+        if raw_value in (None, ""):
+            return []
+        if isinstance(raw_value, list):
+            return [float(value) for value in raw_value]
+        if isinstance(raw_value, str):
+            try:
+                parsed = json.loads(raw_value)
+            except json.JSONDecodeError:
+                return []
+            if isinstance(parsed, list):
+                return [float(value) for value in parsed]
+        return []

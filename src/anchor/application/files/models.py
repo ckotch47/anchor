@@ -20,6 +20,21 @@ class IndexedFileRecord(BaseModel):
     deleted_at: str | None
 
 
+class FileChunkRecord(BaseModel):
+    id: str
+    document_id: str
+    project: str
+    path: str
+    root_path: str
+    language: str
+    chunk_index: int
+    start_line: int
+    end_line: int
+    chunk_text: str
+    token_count: int
+    created_at: str
+
+
 class FileListItem(BaseModel):
     id: str
     path: str
@@ -33,6 +48,16 @@ class FileSearchHit(BaseModel):
     chunk_id: str
     score: float
     snippet: str
+
+
+class FileSearchCandidate(BaseModel):
+    file: FileListItem
+    chunk_id: str
+    snippet: str
+    token_count: int
+    lexical_score: float = 0.0
+    vector_score: float | None = None
+    rerank_score: float | None = None
 
 
 class FilesIndexResult(BaseModel):

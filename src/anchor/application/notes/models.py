@@ -28,15 +28,23 @@ class NoteListItem(BaseModel):
     created_at: str
 
 
+class NoteSearchItem(BaseModel):
+    id: str
+    project: str
+    title: str
+    pinned: bool
+    created_at: str
+
+
 class NotesSearchHit(BaseModel):
-    note: NoteRecord
+    note: NoteSearchItem
     chunk_id: str
     score: float
     snippet: str
 
 
 class NotesSearchCandidate(BaseModel):
-    note: NoteRecord
+    note: NoteSearchItem
     chunk_id: str
     snippet: str
     token_count: int

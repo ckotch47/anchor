@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import json
+from collections import OrderedDict
 from pathlib import Path
 
 from anchor.adapters.sqlite_files_repository import SqliteFilesRepository
+from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.files.chunking import FileChunkingService
-from anchor.application.files.models import FileSearchHit, FilesIndexResult, FilesSearchResult
+from anchor.application.files.models import FileSearchCandidate, FileSearchHit, FilesIndexResult, FilesSearchResult
 from anchor.application.retrieval.document_chunking import count_tokens
+from anchor.application.retrieval.rerank_service import RerankService
+from anchor.application.retrieval.search_scoring import combine_search_scores
 
 _BINARY_SUFFIXES = {
     ".png",
@@ -47,6 +52,8 @@ class FilesService:
         repository: SqliteFilesRepository,
         chunking_service: FileChunkingService,
         project: str,
+        embedding_service: EmbeddingService | None = None,
+        rerank_service: RerankService | None = None,
         roots: list[str] | None = None,
         ignore_patterns: list[str] | None = None,
         max_file_size: int = 1_000_000,
@@ -57,6 +64,8 @@ class FilesService:
         self._repository = repository
         self._chunking_service = chunking_service
         self._project = project
+        self._embedding_service = embedding_service
+        self._rerank_service = rerank_service
         self._roots = roots or []
         self._ignore_patterns = ignore_patterns or []
         self._max_file_size = max_file_size
@@ -125,6 +134,7 @@ class FilesService:
                     mtime_ns=stat.st_mtime_ns,
                     chunks=chunks,
                 )
+                self._queue_embeddings(document_id)
                 indexed += 1
         for record in self._repository.list_indexed_files(project=resolved_project):
             if record.path not in seen_paths and self._root_matches(record.root_path, resolved_roots):
@@ -144,10 +154,28 @@ class FilesService:
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
         resolved_project = project or self._project
-        results = self._trim_to_budget(
-            self._repository.search(query=query, limit=limit, project=resolved_project),
+        self._drain_pending_embeddings(resolved_project)
+        candidate_limit = max(limit * 4, limit)
+        candidates = self._collect_candidates(query, candidate_limit, resolved_project)
+        reranked_candidates = self._rerank_candidates(query, candidates)
+        deduplicated = self._deduplicate_by_file(reranked_candidates)
+        trimmed = self._trim_to_budget(
+            deduplicated,
             budget_tokens if budget_tokens is not None else self._budget_tokens,
         )
+        results = [
+            FileSearchHit(
+                file=candidate.file,
+                chunk_id=candidate.chunk_id,
+                score=combine_search_scores(
+                    lexical_score=candidate.lexical_score,
+                    vector_score=candidate.vector_score,
+                    rerank_score=candidate.rerank_score,
+                ),
+                snippet=candidate.snippet,
+            )
+            for candidate in trimmed[:limit]
+        ]
         return FilesSearchResult(query=query, count=len(results), results=results)
 
     @staticmethod
@@ -159,6 +187,107 @@ class FilesService:
     def _document_id(project: str, path: str) -> str:
         digest = hashlib.sha256(f"{project}:{path}".encode()).hexdigest()
         return f"file_{digest}"
+
+    def _queue_embeddings(self, document_id: str) -> None:
+        if self._embedding_service is None or not hasattr(self._repository, "enqueue_embedding_index"):
+            return
+        try:
+            self._repository.enqueue_embedding_index(document_id)
+        except Exception:
+            return
+
+    def _drain_pending_embeddings(self, project: str) -> None:
+        if self._embedding_service is None or not hasattr(self._repository, "pending_embedding_documents"):
+            return
+        try:
+            pending_documents = self._repository.pending_embedding_documents(project=project)
+        except Exception:
+            return
+        for document_id in pending_documents:
+            try:
+                chunks = self._repository.list_chunks(document_id)
+                if not chunks:
+                    if hasattr(self._repository, "mark_embedding_index_ready"):
+                        self._repository.mark_embedding_index_ready(document_id)
+                    continue
+                result = self._embedding_service.embed_chunks(
+                    [chunk.id for chunk in chunks],
+                    [chunk.chunk_text for chunk in chunks],
+                )
+                self._repository.store_chunk_embeddings(
+                    result.embeddings,
+                    project=chunks[0].project,
+                    metatags=self._serialize_metatags({}),
+                    created_at=chunks[0].created_at,
+                )
+                if hasattr(self._repository, "mark_embedding_index_ready"):
+                    self._repository.mark_embedding_index_ready(document_id)
+            except Exception as exc:
+                if hasattr(self._repository, "mark_embedding_index_error"):
+                    self._repository.mark_embedding_index_error(document_id, last_error=str(exc))
+
+    def _collect_candidates(self, query: str, limit: int, project: str) -> list[FileSearchCandidate]:
+        lexical_rows = self._repository.search_lexical_candidates(query=query, limit=limit, project=project)
+        semantic_rows: list[FileSearchCandidate] = []
+        if self._embedding_service is not None:
+            try:
+                query_embedding = self._embedding_service.embed_texts([query]).embeddings[0].embedding
+                semantic_rows = self._repository.search_vector_candidates(
+                    query_embedding=query_embedding,
+                    limit=limit,
+                    project=project,
+                )
+            except Exception:
+                semantic_rows = []
+        merged: OrderedDict[str, FileSearchCandidate] = OrderedDict()
+        for candidate in [*lexical_rows, *semantic_rows]:
+            current = merged.get(candidate.chunk_id)
+            if current is None:
+                merged[candidate.chunk_id] = candidate
+                continue
+            current.lexical_score = max(current.lexical_score, candidate.lexical_score)
+            if candidate.vector_score is not None:
+                current.vector_score = (
+                    candidate.vector_score
+                    if current.vector_score is None
+                    else max(current.vector_score, candidate.vector_score)
+                )
+            if candidate.snippet and len(candidate.snippet) > len(current.snippet):
+                current.snippet = candidate.snippet
+            current.token_count = max(current.token_count, candidate.token_count)
+        return list(merged.values())
+
+    def _rerank_candidates(self, query: str, candidates: list[FileSearchCandidate]) -> list[FileSearchCandidate]:
+        if not candidates:
+            return []
+        if self._rerank_service is None:
+            return candidates
+        rerank_scores = self._rerank_service.rerank(query, [candidate.snippet for candidate in candidates])
+        for candidate, rerank_score in zip(candidates, rerank_scores, strict=True):
+            candidate.rerank_score = rerank_score
+        return candidates
+
+    def _deduplicate_by_file(self, candidates: list[FileSearchCandidate]) -> list[FileSearchCandidate]:
+        best_by_file: OrderedDict[str, FileSearchCandidate] = OrderedDict()
+        for candidate in candidates:
+            key = candidate.file.id
+            current = best_by_file.get(key)
+            score = combine_search_scores(
+                lexical_score=candidate.lexical_score,
+                vector_score=candidate.vector_score,
+                rerank_score=candidate.rerank_score,
+            )
+            if current is None:
+                best_by_file[key] = candidate
+                continue
+            current_score = combine_search_scores(
+                lexical_score=current.lexical_score,
+                vector_score=current.vector_score,
+                rerank_score=current.rerank_score,
+            )
+            if score > current_score:
+                best_by_file[key] = candidate
+        return list(best_by_file.values())
 
     def _walk_files(self, root: Path):
         for current in root.rglob("*"):
@@ -238,4 +367,13 @@ class FilesService:
 
     @staticmethod
     def _estimate_result_tokens(result: FileSearchHit) -> int:
-        return max(1, count_tokens(result.file.path) + count_tokens(result.snippet))
+        return max(
+            1,
+            count_tokens(result.file.path)
+            + count_tokens(result.file.root_path)
+            + count_tokens(result.snippet),
+        )
+
+    @staticmethod
+    def _serialize_metatags(metatags: dict[str, object]) -> str:
+        return json.dumps(metatags, ensure_ascii=False, separators=(",", ":"))

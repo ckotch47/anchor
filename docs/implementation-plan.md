@@ -67,5 +67,18 @@
 - wire file chunking to `vector.chunk_size` and `vector.chunk_overlap`
 - add file/chunk retrieval commands with compact responses for agents
 - add project-scoped search over indexed files, code, docs, notes, tasks, and history
+- add embeddings and rerank for file search after the lexical file slice is stable
 - add explicit config for roots, ignore patterns, and refresh policy
 - add tests for index rebuild, change detection, and negative path handling
+
+## Delivery order
+
+1. Files retrieval hardening
+   - live indexing
+   - lexical search
+   - vector embeddings
+   - rerank
+2. MCP stdio transport
+   - typed tool schema over the same core use-cases
+3. Index consolidation review
+   - only if measured retrieval cost warrants schema simplification

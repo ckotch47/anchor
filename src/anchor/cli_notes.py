@@ -102,6 +102,7 @@ def notes_update(
 def notes_list(
     limit: Annotated[int, typer.Option("--limit")] = 20,
     project: Annotated[str | None, typer.Option("--project")] = None,
+    view: Annotated[str | None, typer.Option("--view")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
     try:
@@ -114,6 +115,7 @@ def notes_list(
                     "notes.list",
                     {"count": result.count, "notes": [note.model_dump() for note in result.notes]},
                     container,
+                    view=view,
                     extra_meta={"project": resolved_project},
                 ),
                 ensure_ascii=False,
@@ -161,6 +163,7 @@ def notes_search(
     query: Annotated[str, typer.Option("--query")],
     limit: Annotated[int, typer.Option("--limit")] = 20,
     project: Annotated[str | None, typer.Option("--project")] = None,
+    view: Annotated[str | None, typer.Option("--view")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
     try:
@@ -177,6 +180,7 @@ def notes_search(
                         "results": [hit.model_dump() for hit in result.results],
                     },
                     container,
+                    view=view,
                     extra_meta={"project": resolved_project},
                 ),
                 ensure_ascii=False,

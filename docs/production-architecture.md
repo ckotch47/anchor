@@ -103,6 +103,7 @@ Filesystem retrieval uses the same retrieval stack, but the source of truth is t
 - exclude binaries, vendor folders, build outputs, and configured ignore paths
 - handle repositories without git by falling back to filesystem metadata and mtime
 - clean stale chunks when files are removed or renamed
+- materialize file chunk embeddings and rerank them through the same provider contract as notes
 - store only metadata and retrieval slices in SQLite
 - keep the file index incremental so refreshes are bounded
 
@@ -125,7 +126,7 @@ Fallback rules:
 - `metatags` is stored as SQLite JSON text and treated as queryable metadata, not as PostgreSQL `jsonb`.
 - Search should scope by `project` first, then document type, then any metatag filters, and only then run lexical/vector/rerank ranking.
 - Filesystem retrieval should scope by project and root path before indexing, then apply ignore rules before any chunking or ranking.
-- Cross-type retrieval should accept notes, tasks, history, and files as first-class search targets once the file slice lands.
+- Cross-type retrieval should accept notes, tasks, history, and files as first-class search targets.
 
 ## Non-goals
 

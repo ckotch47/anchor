@@ -25,7 +25,7 @@ class NotesCliTest(unittest.TestCase):
                     note_id = add_payload["data"]["note"]["id"]
 
                     with patch("typer.echo") as list_echo_mock:
-                        notes_list()
+                        notes_list(view="full")
 
                     list_payload = json.loads(list_echo_mock.call_args.args[0])
                     with patch("typer.echo") as get_echo_mock:
@@ -40,6 +40,7 @@ class NotesCliTest(unittest.TestCase):
         self.assertTrue(list_payload["ok"])
         self.assertEqual(list_payload["command"], "notes.list")
         self.assertEqual(list_payload["data"]["count"], 1)
+        self.assertEqual(list_payload["meta"]["view"], "full")
         self.assertEqual(list_payload["data"]["notes"][0]["id"], note_id)
         self.assertEqual(list_payload["data"]["notes"][0]["project"], "workspace")
         self.assertNotIn("body", list_payload["data"]["notes"][0])
@@ -94,7 +95,7 @@ class NotesCliTest(unittest.TestCase):
                         notes_get(note_id=note_id, project="repo-a")
 
                     with patch("typer.echo") as search_echo_mock:
-                        notes_search(query="Scoped", project="repo-a")
+                        notes_search(query="Scoped", project="repo-a", view="full")
 
         get_payload = json.loads(get_echo_mock.call_args.args[0])
         search_payload = json.loads(search_echo_mock.call_args.args[0])
@@ -104,6 +105,7 @@ class NotesCliTest(unittest.TestCase):
         self.assertEqual(list_payload["data"]["notes"][0]["project"], "repo-a")
         self.assertEqual(get_payload["data"]["note"]["project"], "repo-a")
         self.assertEqual(search_payload["meta"]["project"], "repo-a")
+        self.assertEqual(search_payload["meta"]["view"], "full")
 
     def test_notes_add_empty_payload_emits_machine_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

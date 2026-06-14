@@ -22,7 +22,7 @@
 
 ## Negative request contract
 
-- Future write and update commands such as `notes add`, `notes update`, `tasks add`, and `tasks update` must reject empty payloads with `INVALID_ARGS`.
+- Write and update commands such as `notes add`, `notes update`, `tasks add`, `tasks update`, and `history append` must reject empty payloads with `INVALID_ARGS`.
 - Future search commands must reject invalid `--limit` values with `INVALID_ARGS` instead of silently clamping.
 - If a command requires generation and the provider is unavailable, it must emit `OFFLINE_ONLY` or `PROVIDER_OFFLINE` with a stable JSON error envelope.
 
@@ -58,7 +58,7 @@
 ```
 - `data` must contain the command result only.
 - `meta` is for execution details, not business state.
-- Default output should be compact unless `--view full` is requested.
+- Retrieval commands should stay compact by default; `--view` is a request hint that is echoed in `meta` for compatibility with agent clients.
 
 ## Per-command config
 
@@ -203,6 +203,7 @@ anchor notes get --id note_123 --project repo-a
 - Search text is normalized before `MATCH`, so special FTS characters are treated as query text, not syntax.
 - The target contract is project-scoped and can further filter by metatags before ranking.
 - Search is filtered to the note domain before ranking.
+- Each hit returns a compact note summary with `id`, `project`, `title`, `pinned`, `created_at`, `chunk_id`, `score`, and `snippet`.
 - Use `--project` to search a specific repository or workspace.
 - Start with `--limit` only when you need to trim the response.
 
@@ -210,6 +211,57 @@ Example:
 
 ```bash
 anchor notes search --query "rag plan" --limit 5 --project repo-a
+```
+
+### `anchor history append`
+
+- Appends a compact working-history entry to the shared SQLite core.
+- Requires `--entry-type` and `--payload`.
+- Accepts `--actor`, `--correlation-id`, `--project`, and `--metatags`.
+- Uses the same document spine and retrieval indexing as the other domain slices.
+
+Example:
+
+```bash
+anchor history append --entry-type deploy --payload "Deploy step completed" --project repo-a --metatags '{"topic":"ops"}'
+```
+
+### `anchor history search`
+
+- Searches history entries through the shared retrieval layer.
+- Uses the same lexical/vector/rerank/budget pipeline as notes.
+- Is project-scoped and returns compact hits with only `id`, `project`, `entry_type`, `actor`, `correlation_id`, `created_at`, and `snippet`.
+
+Example:
+
+```bash
+anchor history search --query "deploy" --project repo-a
+```
+
+### `anchor history update`
+
+- Partially updates a history entry in the shared SQLite core.
+- Use `--id` with the history id returned by `history append`.
+- Accepts optional `--entry-type`, `--payload`, `--actor`, `--correlation-id`, `--project`, and `--metatags`.
+- Leaves unspecified fields unchanged and refreshes retrieval chunks when the textual payload changes.
+
+Example:
+
+```bash
+anchor history update --id history_123 --payload "Deploy step updated" --project repo-a
+```
+
+### `anchor history delete`
+
+- Soft-deletes a history entry in the shared SQLite core.
+- Use `--id` with the history id returned by `history append`.
+- Use `--project` to delete from a non-default project scope.
+- The deleted entry is removed from list/search/get visibility and its retrieval chunks are purged.
+
+Example:
+
+```bash
+anchor history delete --id history_123 --project repo-a
 ```
 
 ### `anchor tasks add`
@@ -253,6 +305,18 @@ Example:
 
 ```bash
 anchor search --query "deploy" --types notes,tasks,files --limit 5 --project repo-a --explain
+```
+
+### `anchor mcp`
+
+- Starts the same core use-cases over MCP `stdio`.
+- Exposes typed tools for health, config, notes, tasks, files, and cross-entity search.
+- Uses the same SQLite container and service layer as the CLI.
+
+Example:
+
+```bash
+anchor mcp
 ```
 
 ### `anchor files index`
@@ -348,7 +412,10 @@ anchor tasks delete --id task_123 --project repo-a
 - `anchor tasks done`
 - `anchor files index`
 - `anchor files search`
+- `anchor mcp`
 - `anchor history append`
+- `anchor history update`
+- `anchor history delete`
 - `anchor history search`
 - `anchor db migrate`
 - `anchor db reindex`
@@ -365,7 +432,7 @@ anchor tasks delete --id task_123 --project repo-a
 - `memory` is the unified retrieval surface over notes/tasks/history, not a separate source of truth.
 - `notes` already reuses the shared retrieval-ready SQLite core.
 - `files` adds live filesystem indexing on top of the same retrieval core.
-- `history` and `tasks` will reuse the same core when their slices land.
+- `history` and `tasks` reuse the same core for their current slices and future extensions.
 - Each domain owns its table(s), while search uses shared document spine + derived retrieval tables.
 - `project` and `metatags` are part of the target contract for all domain entities and should be respected by list/search commands.
 - Mutable domain entities should expose partial `update` commands with the same project-scoped contract.
