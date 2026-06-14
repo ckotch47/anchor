@@ -37,6 +37,10 @@ class ConfigService:
                 self._set_model_field(config.runtime, key, value)
             case "provider":
                 self._set_model_field(config.provider, key, value)
+            case "metadata":
+                self._set_model_field(config.metadata, key, value)
+            case "links":
+                self._set_model_field(config.links, key, value)
             case "vector":
                 self._set_model_field(config.vector, key, value)
             case "filesystem":
