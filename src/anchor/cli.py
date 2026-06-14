@@ -159,7 +159,11 @@ def _handle_config_init(container: Any, force: bool = False) -> None:
 
 @app.command(name="db")
 def db_command(
-    action: Annotated[str, typer.Argument(..., help="migrate")],
+    action: Annotated[str, typer.Argument(..., help="migrate or compact")],
+    retention_days: Annotated[int, typer.Option("--retention-days")] = 30,
+    rebuild_search_indexes: Annotated[bool, typer.Option("--rebuild-search-indexes/--no-rebuild-search-indexes")] = True,
+    vacuum: Annotated[bool, typer.Option("--vacuum/--no-vacuum")] = True,
+    checkpoint: Annotated[bool, typer.Option("--checkpoint/--no-checkpoint")] = True,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
     try:
@@ -167,10 +171,20 @@ def db_command(
         match action:
             case "migrate":
                 _handle_db_migrate(container)
+            case "compact":
+                _handle_db_compact(
+                    container,
+                    retention_days=retention_days,
+                    rebuild_search_indexes=rebuild_search_indexes,
+                    vacuum=vacuum,
+                    checkpoint=checkpoint,
+                )
             case _:
-                emit_error("db", "INVALID_ARGS", "db action must be 'migrate'")
+                emit_error("db", "INVALID_ARGS", "db action must be 'migrate' or 'compact'")
     except typer.Exit:
         raise
+    except ValueError as exc:
+        emit_error("db", "INVALID_ARGS", str(exc))
     except Exception as exc:
         emit_error("db", "DB_MIGRATION_FAILED", str(exc))
 
@@ -182,6 +196,7 @@ def mcp_command() -> None:
 
 def _handle_db_migrate(container: Any) -> None:
     result = container.migration_service.migrate()
+    checkpoint = container.maintenance_service.checkpoint_wal()
     payload = {
         "ok": True,
         "command": "db.migrate",
@@ -190,7 +205,41 @@ def _handle_db_migrate(container: Any) -> None:
             "applied": result.applied,
             "current_version": result.current_version,
             "applied_versions": result.applied_versions,
+            "checkpoint": checkpoint,
         },
+        "meta": {
+            "view": container.config.runtime.default_view,
+            "profile": container.profile_name,
+        },
+    }
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _handle_db_compact(
+    container: Any,
+    *,
+    retention_days: int,
+    rebuild_search_indexes: bool,
+    vacuum: bool,
+    checkpoint: bool,
+) -> None:
+    if retention_days < 0:
+        raise ValueError("retention_days must be greater than or equal to zero")
+    deleted_before = None
+    if retention_days > 0:
+        from datetime import UTC, datetime, timedelta
+
+        deleted_before = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
+    result = container.maintenance_service.compact(
+        deleted_before=deleted_before,
+        rebuild_indexes=rebuild_search_indexes,
+        vacuum=vacuum,
+        checkpoint=checkpoint,
+    )
+    payload = {
+        "ok": True,
+        "command": "db.compact",
+        "data": result.model_dump(),
         "meta": {
             "view": container.config.runtime.default_view,
             "profile": container.profile_name,

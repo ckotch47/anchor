@@ -26,6 +26,33 @@ class DbCliTest(unittest.TestCase):
         self.assertEqual(payload["command"], "db.migrate")
         self.assertEqual(payload["data"]["database_path"], str(db_path))
         self.assertEqual(payload["data"]["current_version"], 6)
+        self.assertIn("checkpoint", payload["data"])
+
+    def test_db_compact_emits_json(self) -> None:
+        with patch("anchor.cli.build_container") as build_container_mock:
+            build_container_mock.return_value.config.runtime.default_view = "compact"
+            build_container_mock.return_value.profile_name = None
+            maintenance_service = build_container_mock.return_value.maintenance_service
+            maintenance_service.compact.return_value.model_dump.return_value = {
+                "purged_documents": 3,
+                "rebuilt_indexes": ["document_chunks_fts", "file_chunks_fts"],
+                "vacuumed": True,
+                "checkpoint": {"busy": 0, "log": 0, "checkpointed": 0},
+            }
+            with patch("typer.echo") as echo_mock:
+                db_command(
+                    "compact",
+                    retention_days=14,
+                    rebuild_search_indexes=True,
+                    vacuum=True,
+                    checkpoint=True,
+                )
+
+        payload = json.loads(echo_mock.call_args.args[0])
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["command"], "db.compact")
+        self.assertEqual(payload["data"]["purged_documents"], 3)
+        maintenance_service.compact.assert_called_once()
 
     def test_db_migrate_failure_emits_machine_error(self) -> None:
         container = patch("anchor.cli.build_container")

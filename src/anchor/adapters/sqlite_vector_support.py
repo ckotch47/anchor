@@ -4,6 +4,8 @@ import sqlite3
 from functools import lru_cache
 from importlib import resources
 
+VECTOR_PYTHON_FALLBACK_LIMIT = 10_000
+
 
 @lru_cache(maxsize=1)
 def sqlite_vector_extension_path() -> str | None:
@@ -46,6 +48,32 @@ def ensure_vector_index(connection: sqlite3.Connection, *, table: str, column: s
 
 def initialize_chunk_embeddings_vector(connection: sqlite3.Connection, dimension: int) -> bool:
     return ensure_vector_index(connection, table="chunk_embeddings", column="embedding", dimension=dimension)
+
+
+def chunk_embeddings_project_count(connection: sqlite3.Connection, *, project: str) -> int:
+    row = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM chunk_embeddings
+        WHERE project = ?
+        """,
+        (project,),
+    ).fetchone()
+    return int(row[0]) if row is not None else 0
+
+
+def require_vector_extension_for_large_python_fallback(
+    connection: sqlite3.Connection,
+    *,
+    project: str,
+    threshold: int = VECTOR_PYTHON_FALLBACK_LIMIT,
+) -> None:
+    if chunk_embeddings_project_count(connection, project=project) <= threshold:
+        return
+    raise RuntimeError(
+        "SQLite vector extension is unavailable and Python fallback is disabled above "
+        f"{threshold} embeddings. Install sqliteai-vector to enable vector search."
+    )
 
 
 def cosine_distance_to_score(distance: float) -> float:

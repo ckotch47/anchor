@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from anchor.application.system.health_service import HealthResult
-
 
 class HealthPort(Protocol):
-    def health(self) -> HealthResult: ...
+    def health(self): ...
+
+
+class MaintenancePort(Protocol):
+    def checkpoint_wal(self) -> dict[str, int]: ...
+
+    def auto_maintain_if_due(self, *, interval_days: int = 7) -> bool: ...

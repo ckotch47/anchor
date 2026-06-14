@@ -1,4 +1,4 @@
-.PHONY: help venv install lint test run clean
+.PHONY: help venv install build lint test run clean
 
 PYTHON ?= python3
 VENV ?= .venv
@@ -11,6 +11,7 @@ help:
 	@printf '%s\n' "Targets:" \
 		"  make venv     - create local .venv" \
 		"  make install  - install project in editable mode with dev tools" \
+		"  make build    - build wheel and sdist into dist/" \
 		"  make lint     - run hard lint checks" \
 		"  make test     - run unit tests" \
 		"  make run      - run anchor from the local venv" \
@@ -21,6 +22,9 @@ venv:
 
 install: venv
 	$(PIP) install -e ".[dev]"
+
+build: install
+	$(PY) -m build
 
 lint: install
 	$(BIN)/ruff check src tests

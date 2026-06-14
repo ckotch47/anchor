@@ -86,6 +86,7 @@ def config_init(force: bool = False, profile: str | None = None) -> dict[str, An
 def db_migrate(profile: str | None = None) -> dict[str, Any]:
     container = _container(profile)
     result = container.migration_service.migrate()
+    checkpoint = container.maintenance_service.checkpoint_wal()
     return {
         "ok": True,
         "command": "db.migrate",
@@ -94,7 +95,41 @@ def db_migrate(profile: str | None = None) -> dict[str, Any]:
             "applied": result.applied,
             "current_version": result.current_version,
             "applied_versions": result.applied_versions,
+            "checkpoint": checkpoint,
         },
+        "meta": {
+            "view": container.config.runtime.default_view,
+            "profile": container.profile_name,
+        },
+    }
+
+
+@mcp_app.tool(name="db_compact", description="Compact SQLite storage and rebuild retrieval indexes")
+def db_compact(
+    retention_days: int = 30,
+    rebuild_search_indexes: bool = True,
+    vacuum: bool = True,
+    checkpoint: bool = True,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    if retention_days < 0:
+        return _error("db.compact", "INVALID_ARGS", "retention_days must be greater than or equal to zero")
+    deleted_before = None
+    if retention_days > 0:
+        from datetime import UTC, datetime, timedelta
+
+        deleted_before = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
+    result = container.maintenance_service.compact(
+        deleted_before=deleted_before,
+        rebuild_indexes=rebuild_search_indexes,
+        vacuum=vacuum,
+        checkpoint=checkpoint,
+    )
+    return {
+        "ok": True,
+        "command": "db.compact",
+        "data": result.model_dump(),
         "meta": {
             "view": container.config.runtime.default_view,
             "profile": container.profile_name,
@@ -157,6 +192,7 @@ def notes_update(
 @mcp_app.tool(name="notes_list", description="List notes in the current project")
 def notes_list(
     limit: int = 20,
+    cursor: str | None = None,
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
@@ -167,10 +203,14 @@ def notes_list(
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
         return _error("notes.list", "INVALID_ARGS", str(exc))
-    result = container.notes_service.list(limit=limit, project=resolved_project, view=resolved_view)
+    result = container.notes_service.list(limit=limit, cursor=cursor, project=resolved_project, view=resolved_view)
     return _success(
         "notes.list",
-        {"count": result.count, "notes": [note.model_dump() for note in result.notes]},
+        {
+            "count": result.count,
+            "notes": [note.model_dump() for note in result.notes],
+            **({"next_cursor": result.next_cursor} if result.next_cursor is not None else {}),
+        },
         container,
         project=resolved_project,
         extra_meta={"view": resolved_view},
@@ -373,6 +413,7 @@ def tasks_update(
 @mcp_app.tool(name="tasks_list", description="List tasks in the current project")
 def tasks_list(
     limit: int = 20,
+    cursor: str | None = None,
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
@@ -383,10 +424,14 @@ def tasks_list(
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
         return _error("tasks.list", "INVALID_ARGS", str(exc))
-    result = container.tasks_service.list(limit=limit, project=resolved_project, view=resolved_view)
+    result = container.tasks_service.list(limit=limit, cursor=cursor, project=resolved_project, view=resolved_view)
     return _success(
         "tasks.list",
-        {"count": result.count, "tasks": [task.model_dump() for task in result.tasks]},
+        {
+            "count": result.count,
+            "tasks": [task.model_dump() for task in result.tasks],
+            **({"next_cursor": result.next_cursor} if result.next_cursor is not None else {}),
+        },
         container,
         project=resolved_project,
         extra_meta={"view": resolved_view},
@@ -509,6 +554,7 @@ def files_delete(
 @mcp_app.tool(name="files_list", description="List indexed files in the current project")
 def files_list(
     limit: int = 20,
+    cursor: str | None = None,
     root: str | None = None,
     language: str | None = None,
     path_prefix: str | None = None,
@@ -524,6 +570,7 @@ def files_list(
         return _error("files.list", "INVALID_ARGS", str(exc))
     result: FilesListResult = container.files_service.list(
         limit=limit,
+        cursor=cursor,
         root=root,
         language=language,
         path_prefix=path_prefix,
@@ -532,7 +579,11 @@ def files_list(
     )
     return _success(
         "files.list",
-        {"count": result.count, "files": [file.model_dump() for file in result.files]},
+        {
+            "count": result.count,
+            "files": [file.model_dump() for file in result.files],
+            **({"next_cursor": result.next_cursor} if result.next_cursor is not None else {}),
+        },
         container,
         project=resolved_project,
         extra_meta={"view": resolved_view},
@@ -587,6 +638,8 @@ def search(
     types: list[str] | None = None,
     limit: int = 20,
     budget_tokens: int | None = None,
+    cursor: str | None = None,
+    projects: list[str] | None = None,
     project: str | None = None,
     view: str | None = None,
     explain: bool = False,
@@ -600,9 +653,11 @@ def search(
             query=query,
             types=types or ["notes", "tasks", "history", "files"],
             project=resolved_project,
+            projects=projects,
             limit=limit,
             budget_tokens=budget_tokens if budget_tokens is not None else container.config.runtime.default_budget_tokens,
             explain=explain,
+            cursor=cursor,
             weights=weights or {},
         )
         result = container.search_service.search(search_query)
@@ -614,7 +669,12 @@ def search(
             data,
             container,
             view=view,
-            extra_meta={"project": resolved_project, "types": search_query.types, "explain": explain},
+            extra_meta={
+                "project": resolved_project,
+                "projects": search_query.projects or [resolved_project],
+                "types": search_query.types,
+                "explain": explain,
+            },
         )
     except ValueError as exc:
         return _error("search", "INVALID_ARGS", str(exc))

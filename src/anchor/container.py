@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from anchor.adapters.filesystem_config_repository import FileSystemConfigRepository
 from anchor.adapters.sqlite_files_repository import SqliteFilesRepository
 from anchor.adapters.sqlite_history_repository import SqliteHistoryRepository
+from anchor.adapters.sqlite_maintenance_repository import SqliteMaintenanceRepository
 from anchor.adapters.sqlite_migration_repository import SqliteMigrationRepository
 from anchor.adapters.sqlite_notes_repository import SqliteNotesRepository
 from anchor.adapters.sqlite_tasks_repository import SqliteTasksRepository
@@ -19,6 +20,7 @@ from anchor.application.retrieval.rerank_service import RerankService
 from anchor.application.retrieval.search_service import SearchService
 from anchor.application.system.config_service import ConfigService
 from anchor.application.system.health_service import HealthService
+from anchor.application.system.maintenance_service import MaintenanceService
 from anchor.application.system.migration_service import MigrationService
 from anchor.application.tasks.service import TasksService
 from anchor.config import AppConfig, default_database_path
@@ -30,6 +32,7 @@ class Container:
     config_path: str
     profile_name: str | None
     health_service: HealthService
+    maintenance_service: MaintenanceService
     config_service: ConfigService
     migration_service: MigrationService
     notes_service: NotesService
@@ -42,10 +45,11 @@ class Container:
 def build_container(profile: str | None = None, auto_migrate: bool = True) -> Container:
     repo = FileSystemConfigRepository()
     config, config_path, profile_name = repo.load(profile=profile)
-    health_service = HealthService(config=config)
     config_service = ConfigService(repository=repo)
     database_path = default_database_path()
+    maintenance_service = MaintenanceService(repository=SqliteMaintenanceRepository(database_path=database_path))
     migration_service = MigrationService(repository=SqliteMigrationRepository(database_path=database_path))
+    health_service = HealthService(config=config, maintenance_port=maintenance_service)
     embedding_service = None
     rerank_service = None
     if not config.runtime.offline_only:
@@ -111,6 +115,7 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         config_path=str(config_path),
         profile_name=profile_name,
         health_service=health_service,
+        maintenance_service=maintenance_service,
         config_service=config_service,
         migration_service=migration_service,
         notes_service=notes_service,

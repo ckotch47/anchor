@@ -49,6 +49,7 @@ Qatoria Anchor is a local CLI tool for agents.
 - [Error codes](./docs/error-codes.md)
 - [Agent usage](./docs/agent-usage.md)
 - [Open questions](./docs/open-questions.md)
+- [Wiki export](./wiki/README.md)
 - [Changelog](./CHANGELOG.md)
 
 ## Быстрый старт
@@ -57,6 +58,13 @@ Qatoria Anchor is a local CLI tool for agents.
 make venv
 make install
 make run
+```
+
+Если нужен релизный пакет:
+
+```bash
+make build
+pip install dist/*.whl
 ```
 
 Или вручную:

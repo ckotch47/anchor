@@ -317,6 +317,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS file_chunks_fts USING fts5(
 
 CREATE INDEX IF NOT EXISTS idx_indexed_files_project_path ON indexed_files(project, path);
 CREATE INDEX IF NOT EXISTS idx_indexed_files_project_root_path ON indexed_files(project, root_path);
+CREATE INDEX IF NOT EXISTS idx_indexed_files_project_root_path_path ON indexed_files(project, root_path, path);
 CREATE INDEX IF NOT EXISTS idx_file_chunks_project_document_id ON file_chunks(project, document_id);
 CREATE INDEX IF NOT EXISTS idx_file_chunks_project_path_chunk_index ON file_chunks(project, path, chunk_index);
 """.strip(),
