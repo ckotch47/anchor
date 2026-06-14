@@ -16,6 +16,7 @@ from anchor.application.files.service import FilesService
 from anchor.application.history.service import HistoryService
 from anchor.application.notes.service import NotesService
 from anchor.application.retrieval.document_chunking import DocumentChunkingService
+from anchor.application.retrieval.rerank_provider_service import OpenAICompatibleRerankProvider
 from anchor.application.retrieval.rerank_service import RerankService
 from anchor.application.retrieval.search_service import SearchService
 from anchor.application.system.config_service import ConfigService
@@ -57,15 +58,17 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
             base_url=config.provider.base_url,
             api_key_env=config.provider.api_key_env,
         )
+        rerank_provider = OpenAICompatibleRerankProvider(
+            base_url=config.provider.base_url,
+            api_key_env=config.provider.api_key_env,
+        )
         embedding_service = EmbeddingService(
             provider=embeddings_provider,
             model=config.provider.embedding_model,
         )
         rerank_service = RerankService(
-            embedding_service=EmbeddingService(
-                provider=embeddings_provider,
-                model=config.provider.rerank_model,
-            )
+            provider=rerank_provider,
+            model=config.provider.rerank_model,
         )
     notes_service = NotesService(
         repository=SqliteNotesRepository(database_path=database_path, vector_dimension=config.vector.dimension),

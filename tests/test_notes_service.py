@@ -164,6 +164,12 @@ class FailingEmbeddingsProvider:
         raise RuntimeError("embeddings unavailable")
 
 
+class FakeRerankProvider:
+    def rerank(self, query: str, texts: list[str], model: str) -> list[float]:
+        del query, model
+        return [1.0 - (index * 0.1) for index, _ in enumerate(texts)]
+
+
 class SearchPipelineRepository(FakeNotesRepository):
     def __init__(self) -> None:
         super().__init__()
@@ -358,9 +364,7 @@ class NotesServiceTest(unittest.TestCase):
             chunking_service=DocumentChunkingService(),
             project="workspace",
             embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="embed"),
-            rerank_service=RerankService(
-                embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="rerank")
-            ),
+            rerank_service=RerankService(provider=FakeRerankProvider(), model="rerank"),
             budget_tokens=100,
         )
 
@@ -393,9 +397,7 @@ class NotesServiceTest(unittest.TestCase):
             chunking_service=DocumentChunkingService(),
             project="workspace",
             embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="embed"),
-            rerank_service=RerankService(
-                embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="rerank")
-            ),
+            rerank_service=RerankService(provider=FakeRerankProvider(), model="rerank"),
             budget_tokens=100,
         )
 
@@ -411,9 +413,7 @@ class NotesServiceTest(unittest.TestCase):
             chunking_service=DocumentChunkingService(),
             project="workspace",
             embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="embed"),
-            rerank_service=RerankService(
-                embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="rerank")
-            ),
+            rerank_service=RerankService(provider=FakeRerankProvider(), model="rerank"),
             budget_tokens=12,
         )
 

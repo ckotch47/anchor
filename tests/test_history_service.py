@@ -185,6 +185,12 @@ class FakeEmbeddingsProvider:
         return [[float(len(text))] for text in texts]
 
 
+class FakeRerankProvider:
+    def rerank(self, query: str, texts: list[str], model: str) -> list[float]:
+        del query, model
+        return [1.0 - (index * 0.1) for index, _ in enumerate(texts)]
+
+
 class HistoryServiceTest(unittest.TestCase):
     def test_append_queues_embeddings(self) -> None:
         repo = FakeHistoryRepository()
@@ -209,9 +215,7 @@ class HistoryServiceTest(unittest.TestCase):
             chunking_service=DocumentChunkingService(),
             project="workspace",
             embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="test-embed"),
-            rerank_service=RerankService(
-                embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="test-rerank")
-            ),
+            rerank_service=RerankService(provider=FakeRerankProvider(), model="test-rerank"),
             budget_tokens=100,
         )
 

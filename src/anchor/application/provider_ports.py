@@ -5,3 +5,7 @@ from typing import Protocol
 
 class EmbeddingsProviderPort(Protocol):
     def embed(self, texts: list[str], model: str) -> list[list[float]]: ...
+
+
+class RerankProviderPort(Protocol):
+    def rerank(self, query: str, texts: list[str], model: str) -> list[float]: ...
