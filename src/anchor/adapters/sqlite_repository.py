@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from anchor.adapters.sqlite_support import configure_connection
+from anchor.adapters.sqlite_vector_support import try_load_sqlite_vector_extension
 from anchor.config import default_database_path
 
 
@@ -18,6 +19,7 @@ class SqliteRepositoryBase:
         connection = sqlite3.connect(self._database_path)
         connection.row_factory = sqlite3.Row
         configure_connection(connection, busy_timeout_ms=250)
+        try_load_sqlite_vector_extension(connection)
         try:
             yield connection
         finally:

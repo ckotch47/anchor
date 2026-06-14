@@ -7,6 +7,11 @@ from pathlib import Path
 
 from anchor.adapters.sqlite_repository import SqliteRepositoryBase
 from anchor.adapters.sqlite_support import utc_now_iso
+from anchor.adapters.sqlite_vector_support import (
+    cosine_distance_to_score,
+    ensure_vector_index,
+    try_load_sqlite_vector_extension,
+)
 from anchor.application.embeddings.models import ChunkEmbeddingRecord
 from anchor.application.files.chunking import FileChunkDraft
 from anchor.application.files.models import (
@@ -262,11 +267,13 @@ class SqliteFilesRepository(SqliteRepositoryBase):
         created_at: str,
     ) -> None:
         with self._connect() as connection:
+            use_vector_encoding = try_load_sqlite_vector_extension(connection)
+            embedding_sql = "vector_as_f32(?)" if use_vector_encoding else "?"
             for record in embeddings:
                 connection.execute(
-                    """
+                    f"""
                     INSERT OR REPLACE INTO chunk_embeddings (chunk_id, project, metatags, model, embedding, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, {embedding_sql}, ?)
                     """,
                     (
                         record.chunk_id,
@@ -433,6 +440,62 @@ class SqliteFilesRepository(SqliteRepositoryBase):
         project: str,
     ) -> list[FileSearchCandidate]:
         with self._connect() as connection:
+            if ensure_vector_index(connection, table="chunk_embeddings", column="embedding", dimension=len(query_embedding)):
+                rows = connection.execute(
+                    """
+                    SELECT
+                        f.document_id,
+                        f.project,
+                        f.path,
+                        f.root_path,
+                        f.language,
+                        f.file_size,
+                        f.metatags,
+                        f.created_at,
+                        f.updated_at,
+                        c.id AS chunk_id,
+                        c.chunk_text,
+                        c.token_count,
+                        v.distance AS vector_distance
+                    FROM vector_full_scan('chunk_embeddings', 'embedding', vector_as_f32(?)) AS v
+                    JOIN chunk_embeddings AS ce ON ce.rowid = v.rowid
+                    JOIN file_chunks AS c ON c.id = ce.chunk_id
+                    JOIN indexed_files AS f ON f.document_id = c.document_id
+                    JOIN documents AS d ON d.id = c.document_id
+                    WHERE d.document_type = ?
+                      AND d.project = ?
+                      AND d.deleted_at IS NULL
+                    ORDER BY v.distance ASC
+                    LIMIT ?
+                    """,
+                    (json.dumps(query_embedding, separators=(",", ":")), "file", project, limit),
+                ).fetchall()
+                candidates = [
+                    FileSearchCandidate(
+                        file=compact_file_item(
+                            FileListItem(
+                                id=str(row["document_id"]),
+                                path=str(row["path"]),
+                                root_path=str(row["root_path"]),
+                                language=str(row["language"]),
+                                file_size=int(row["file_size"]),
+                            )
+                        ),
+                        chunk_id=str(row["chunk_id"]),
+                        snippet=self._build_snippet(str(row["chunk_text"])),
+                        token_count=int(row["token_count"]),
+                        vector_score=cosine_distance_to_score(float(row["vector_distance"])),
+                    )
+                    for row in rows
+                ]
+                candidates.sort(
+                    key=lambda item: combine_search_scores(
+                        lexical_score=item.lexical_score,
+                        vector_score=item.vector_score,
+                    ),
+                    reverse=True,
+                )
+                return candidates[:limit]
             rows = connection.execute(
                 """
                 SELECT

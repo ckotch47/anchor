@@ -195,7 +195,7 @@ anchor notes get --id note_123 --project repo-a
 ### `anchor notes search`
 
 - Searches note titles and bodies through the shared SQLite retrieval layer.
-- Uses FTS over materialized retrieval chunks.
+- Uses FTS over materialized retrieval chunks and vector reranking through SQLite-native vector search.
 - Chunking stays a separate preprocessing step before retrieval and rerank.
 - The search pipeline is lexical candidate generation, vector candidate generation, rerank, dedup by note, and budget trim.
 - The final response is capped by the configured token budget so agents get a compact result set.
@@ -229,7 +229,7 @@ anchor history append --entry-type deploy --payload "Deploy step completed" --pr
 ### `anchor history search`
 
 - Searches history entries through the shared retrieval layer.
-- Uses the same lexical/vector/rerank/budget pipeline as notes.
+- Uses the same lexical/vector/rerank/budget pipeline as notes, with vector search executed inside SQLite when the extension is available.
 - Is project-scoped and returns compact hits with only `id`, `project`, `entry_type`, `actor`, `correlation_id`, `created_at`, and `snippet`.
 
 Example:
@@ -281,7 +281,7 @@ anchor tasks add --title "Ship tasks slice" --body "Implement tasks commands" --
 
 - Searches task titles and task bodies through the shared SQLite retrieval layer.
 - Uses FTS over materialized task chunks.
-- The search pipeline is lexical candidate generation plus compact hits with snippets.
+- The search pipeline is lexical candidate generation plus compact hits with snippets; vector search remains reserved for the shared retrieval surface.
 - Existing tasks without chunks are backfilled on demand before search so legacy rows stay searchable.
 - Search text is normalized before `MATCH`, so special FTS characters are treated as query text, not syntax.
 - The target contract is project-scoped and filtered to the task domain before ranking.
@@ -336,6 +336,7 @@ anchor files index --root ./repo --project repo-a
 
 - Searches indexed files through the same compact retrieval surface as notes and tasks.
 - Returns file path, root path, language, file size, a snippet, and a compact score.
+- Uses SQLite-native vector search when the extension is available.
 - Uses the configured project scope by default.
 
 Example:

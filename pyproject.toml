@@ -13,6 +13,7 @@ dependencies = [
   "pydantic>=2.7,<3.0",
   "openai>=1.40,<2.0",
   "mcp>=1.27,<2.0",
+  "sqliteai-vector>=1.0.0,<2.0.0",
 ]
 
 [project.optional-dependencies]
