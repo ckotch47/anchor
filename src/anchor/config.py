@@ -19,8 +19,8 @@ class RuntimeConfig(BaseModel):
 class ProviderConfig(BaseModel):
     base_url: str = "https://api.example.com/v1"
     api_key_env: str = "OPENAI_API_KEY"
-    embedding_model: str = "text-embedding-3-small"
-    rerank_model: str = "gpt-5.5"
+    embedding_model: str = ""
+    rerank_model: str = ""
 
 
 class MetadataFieldConfig(BaseModel):

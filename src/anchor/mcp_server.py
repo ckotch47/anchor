@@ -7,6 +7,7 @@ from mcp.types import CallToolResult
 
 from anchor.application.files.models import FilesGetResult, FilesListResult
 from anchor.application.history.models import HistorySearchResult
+from anchor.application.links.models import DocumentLinkListResult
 from anchor.application.retrieval.search_query import SearchQuery
 from anchor.cli_shared import resolve_project, resolve_view, response_formatter
 from anchor.container import build_container
@@ -158,6 +159,7 @@ def notes_add(
     source_ref: str = "",
     pinned: bool = False,
     project: str | None = None,
+    correlation_id: str | None = None,
     metatags: dict[str, object] | None = None,
     profile: str | None = None,
 ) -> dict[str, Any]:
@@ -170,6 +172,7 @@ def notes_add(
         source_ref=source_ref,
         pinned=pinned,
         project=resolved_project,
+        correlation_id=correlation_id,
         metatags=metatags or {},
     )
     return _tool_result("notes.add", {"note": result.model_dump()}, container, project=resolved_project)
@@ -184,21 +187,26 @@ def notes_update(
     source_ref: str | None = None,
     pinned: bool | None = None,
     project: str | None = None,
+    correlation_id: str | None = None,
     metatags: dict[str, object] | None = None,
     profile: str | None = None,
 ) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result = container.notes_service.update(
-        note_id,
-        title=title,
-        body=body,
-        source=source,
-        source_ref=source_ref,
-        pinned=pinned,
-        project=resolved_project,
-        metatags=metatags,
-    )
+    try:
+        result = container.notes_service.update(
+            note_id,
+            title=title,
+            body=body,
+            source=source,
+            source_ref=source_ref,
+            pinned=pinned,
+            project=resolved_project,
+            correlation_id=correlation_id,
+            metatags=metatags,
+        )
+    except LookupError as exc:
+        return _failure("notes.update", "NOT_FOUND", str(exc), container)
     return _tool_result("notes.update", {"note": result.model_dump()}, container, project=resolved_project)
 
 
@@ -312,15 +320,18 @@ def history_update(
 ) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result = container.history_service.update(
-        history_id,
-        entry_type=entry_type,
-        payload=payload,
-        actor=actor,
-        correlation_id=correlation_id,
-        project=resolved_project,
-        metatags=metatags,
-    )
+    try:
+        result = container.history_service.update(
+            history_id,
+            entry_type=entry_type,
+            payload=payload,
+            actor=actor,
+            correlation_id=correlation_id,
+            project=resolved_project,
+            metatags=metatags,
+        )
+    except LookupError as exc:
+        return _failure("history.update", "NOT_FOUND", str(exc), container)
     return _tool_result("history.update", {"history": result.model_dump()}, container, project=resolved_project)
 
 
@@ -363,7 +374,10 @@ def history_search(
 def history_delete(history_id: str, project: str | None = None, profile: str | None = None) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result = container.history_service.delete(history_id, project=resolved_project)
+    try:
+        result = container.history_service.delete(history_id, project=resolved_project)
+    except LookupError as exc:
+        return _failure("history.delete", "NOT_FOUND", str(exc), container)
     return _tool_result("history.delete", {"history": result.model_dump()}, container, project=resolved_project)
 
 
@@ -418,20 +432,23 @@ def tasks_update(
 ) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result = container.tasks_service.update(
-        task_id,
-        title=title,
-        body=body,
-        source=source,
-        source_ref=source_ref,
-        project=resolved_project,
-        metatags=metatags,
-        task_kind=task_kind,
-        priority=priority,
-        due_at=due_at,
-        parent_document_id=parent_document_id,
-        blocked_by_document_id=blocked_by_document_id,
-    )
+    try:
+        result = container.tasks_service.update(
+            task_id,
+            title=title,
+            body=body,
+            source=source,
+            source_ref=source_ref,
+            project=resolved_project,
+            metatags=metatags,
+            task_kind=task_kind,
+            priority=priority,
+            due_at=due_at,
+            parent_document_id=parent_document_id,
+            blocked_by_document_id=blocked_by_document_id,
+        )
+    except LookupError as exc:
+        return _failure("tasks.update", "NOT_FOUND", str(exc), container)
     return _tool_result("tasks.update", {"task": result.model_dump()}, container, project=resolved_project)
 
 
@@ -516,7 +533,10 @@ def tasks_search(
 def tasks_done(task_id: str, project: str | None = None, profile: str | None = None) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result = container.tasks_service.done(task_id, project=resolved_project)
+    try:
+        result = container.tasks_service.done(task_id, project=resolved_project)
+    except LookupError as exc:
+        return _failure("tasks.done", "NOT_FOUND", str(exc), container)
     return _tool_result("tasks.done", {"task": result.model_dump()}, container, project=resolved_project)
 
 
@@ -524,7 +544,10 @@ def tasks_done(task_id: str, project: str | None = None, profile: str | None = N
 def tasks_delete(task_id: str, project: str | None = None, profile: str | None = None) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result = container.tasks_service.delete(task_id, project=resolved_project)
+    try:
+        result = container.tasks_service.delete(task_id, project=resolved_project)
+    except LookupError as exc:
+        return _failure("tasks.delete", "NOT_FOUND", str(exc), container)
     return _tool_result("tasks.delete", {"task": result.model_dump()}, container, project=resolved_project)
 
 
@@ -536,7 +559,10 @@ def files_index(
 ) -> dict[str, Any]:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
-    result = container.files_service.index(roots=roots, project=resolved_project)
+    try:
+        result = container.files_service.index(roots=roots, project=resolved_project)
+    except ValueError as exc:
+        return _failure("files.index", "INVALID_ARGS", str(exc), container)
     return _tool_result("files.index", result.model_dump(), container, project=resolved_project)
 
 
@@ -620,15 +646,18 @@ def files_list(
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
         return _failure("files.list", "INVALID_ARGS", str(exc), container)
-    result: FilesListResult = container.files_service.list(
-        limit=limit,
-        cursor=cursor,
-        root=root,
-        language=language,
-        path_prefix=path_prefix,
-        project=resolved_project,
-        view=resolved_view,
-    )
+    try:
+        result: FilesListResult = container.files_service.list(
+            limit=limit,
+            cursor=cursor,
+            root=root,
+            language=language,
+            path_prefix=path_prefix,
+            project=resolved_project,
+            view=resolved_view,
+        )
+    except ValueError as exc:
+        return _failure("files.list", "INVALID_ARGS", str(exc), container)
     return _tool_result(
         "files.list",
         {
@@ -660,16 +689,19 @@ def files_search(
         resolved_view = resolve_view(container, view)
     except ValueError as exc:
         return _failure("files.search", "INVALID_ARGS", str(exc), container)
-    result = container.files_service.search(
-        query=query,
-        limit=limit,
-        root=root,
-        language=language,
-        path_prefix=path_prefix,
-        explain=explain,
-        project=resolved_project,
-        view=resolved_view,
-    )
+    try:
+        result = container.files_service.search(
+            query=query,
+            limit=limit,
+            root=root,
+            language=language,
+            path_prefix=path_prefix,
+            explain=explain,
+            project=resolved_project,
+            view=resolved_view,
+        )
+    except ValueError as exc:
+        return _failure("files.search", "INVALID_ARGS", str(exc), container)
     return _tool_result(
         "files.search",
         response_formatter.format_search(
@@ -684,6 +716,45 @@ def files_search(
         project=resolved_project,
         view=resolved_view,
     )
+
+
+@mcp_app.tool(name="links_add", description="Create a typed link between two documents")
+def links_add(source_id: str, target_id: str, relation_type: str, profile: str | None = None) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        result = container.links_service.create(source_id=source_id, target_id=target_id, relation_type=relation_type)
+    except ValueError as exc:
+        return _failure("links.add", "INVALID_ARGS", str(exc), container)
+    return _tool_result("links.add", {"link": result.model_dump()}, container)
+
+
+@mcp_app.tool(name="links_list", description="List links by source or target document id")
+def links_list(
+    source_id: str | None = None,
+    target_id: str | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    if source_id is None and target_id is None:
+        return _failure("links.list", "INVALID_ARGS", "links list requires source_id or target_id", container)
+    try:
+        if source_id is not None:
+            result: DocumentLinkListResult = container.links_service.list_by_source(source_id)
+        else:
+            result = container.links_service.list_by_target(target_id or "")
+    except ValueError as exc:
+        return _failure("links.list", "INVALID_ARGS", str(exc), container)
+    return _tool_result("links.list", {"count": result.count, "links": [link.model_dump() for link in result.links]}, container)
+
+
+@mcp_app.tool(name="links_delete", description="Delete a typed link between two documents")
+def links_delete(source_id: str, target_id: str, relation_type: str, profile: str | None = None) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        deleted = container.links_service.delete(source_id=source_id, target_id=target_id, relation_type=relation_type)
+    except ValueError as exc:
+        return _failure("links.delete", "INVALID_ARGS", str(exc), container)
+    return _tool_result("links.delete", {"deleted": deleted}, container)
 
 
 @mcp_app.tool(name="search", description="Cross-entity retrieval across notes, tasks, history, and files")

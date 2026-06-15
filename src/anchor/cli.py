@@ -7,6 +7,7 @@ import typer
 
 from anchor.cli_files import files_app, files_delete, files_get, files_index, files_list, files_search
 from anchor.cli_history import history_app, history_append, history_delete, history_search, history_update
+from anchor.cli_links import links_add, links_app, links_delete, links_list
 from anchor.cli_notes import notes_add, notes_app, notes_delete, notes_get, notes_list, notes_search, notes_update
 from anchor.cli_search import search_command
 from anchor.cli_shared import response_formatter
@@ -27,6 +28,7 @@ app = typer.Typer(add_completion=False, help="Qatoria Anchor")
 app.add_typer(notes_app, name="notes")
 app.add_typer(history_app, name="history")
 app.add_typer(files_app, name="files")
+app.add_typer(links_app, name="links")
 app.add_typer(tasks_app, name="tasks")
 app.command(name="search")(search_command)
 
@@ -44,6 +46,10 @@ __all__ = [
     "history_delete",
     "history_search",
     "history_update",
+    "links_add",
+    "links_app",
+    "links_delete",
+    "links_list",
     "mcp_command",
     "notes_add",
     "notes_delete",
