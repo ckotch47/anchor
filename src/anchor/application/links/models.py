@@ -3,6 +3,12 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
+class DocumentLinkSummary(BaseModel):
+    id: str
+    type: str
+    direction: str
+
+
 class DocumentLinkRecord(BaseModel):
     source_id: str
     target_id: str

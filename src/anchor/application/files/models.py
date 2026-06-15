@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from anchor.application.files.chunking import FileChunkDraft
+from anchor.application.links.models import DocumentLinkSummary
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class IndexedFileRecord(BaseModel):
     file_size: int
     content_hash: str
     mtime_ns: int
+    links: list[DocumentLinkSummary] = Field(default_factory=list)
     created_at: str
     updated_at: str
     deleted_at: str | None
@@ -58,6 +60,7 @@ class FileListItem(BaseModel):
     root_path: str
     language: str
     file_size: int
+    links: list[DocumentLinkSummary] = Field(default_factory=list)
 
 
 class FileSearchHit(BaseModel):

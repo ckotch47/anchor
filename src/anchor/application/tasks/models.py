@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from anchor.application.links.models import DocumentLinkSummary
 
 
 class TaskRecord(BaseModel):
@@ -23,6 +25,7 @@ class TaskRecord(BaseModel):
     blocked_reason: str | None
     parent_document_id: str | None
     blocked_by_document_id: str | None
+    links: list[DocumentLinkSummary] = Field(default_factory=list)
     created_at: str
     updated_at: str
 
@@ -32,6 +35,7 @@ class TaskListItem(BaseModel):
     title: str
     status: str
     priority: int
+    links: list[DocumentLinkSummary] = Field(default_factory=list)
 
 
 class TaskSearchHit(BaseModel):

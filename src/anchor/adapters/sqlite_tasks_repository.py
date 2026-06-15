@@ -5,8 +5,10 @@ import sqlite3
 from pathlib import Path
 
 from anchor.adapters.sqlite_ids import uuid7_str
+from anchor.adapters.sqlite_link_summaries import parse_link_summaries
 from anchor.adapters.sqlite_repository import SqliteRepositoryBase
 from anchor.adapters.sqlite_support import utc_now_iso
+from anchor.application.links.models import DocumentLinkSummary
 from anchor.application.retrieval.search_query import normalize_fts5_query
 from anchor.application.retrieval.search_scoring import combine_search_scores
 from anchor.application.tasks.models import TaskListItem, TaskRecord, TaskSearchHit
@@ -237,6 +239,26 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                     t.blocked_reason,
                     t.parent_document_id,
                     t.blocked_by_document_id,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', to_document_id, 'type', link_type, 'direction', 'out')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE from_document_id = d.id
+                    ) AS outbound_links_json,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', from_document_id, 'type', link_type, 'direction', 'in')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE to_document_id = d.id
+                    ) AS inbound_links_json,
                     d.created_at,
                     d.updated_at
                 FROM documents AS d
@@ -272,6 +294,26 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                     t.blocked_reason,
                     t.parent_document_id,
                     t.blocked_by_document_id,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', to_document_id, 'type', link_type, 'direction', 'out')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE from_document_id = d.id
+                    ) AS outbound_links_json,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', from_document_id, 'type', link_type, 'direction', 'in')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE to_document_id = d.id
+                    ) AS inbound_links_json,
                     d.created_at,
                     d.updated_at
                 FROM documents AS d
@@ -371,6 +413,26 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                     t.blocked_reason,
                     t.parent_document_id,
                     t.blocked_by_document_id,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', to_document_id, 'type', link_type, 'direction', 'out')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE from_document_id = d.id
+                    ) AS outbound_links_json,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', from_document_id, 'type', link_type, 'direction', 'in')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE to_document_id = d.id
+                    ) AS inbound_links_json,
                     d.created_at,
                     d.updated_at,
                     c.id AS chunk_id,
@@ -411,25 +473,38 @@ class SqliteTasksRepository(SqliteRepositoryBase):
             blocked_reason=row["blocked_reason"],
             parent_document_id=row["parent_document_id"],
             blocked_by_document_id=row["blocked_by_document_id"],
+            links=self._row_to_links(row),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
         )
 
-    def _row_to_list_item(self, row: sqlite3.Row) -> TaskListItem:
+    def _row_to_list_item(self, row: sqlite3.Row, *, include_links: bool = False) -> TaskListItem:
         return TaskListItem(
             id=str(row["id"]),
             title=str(row["title"]),
             status=str(row["status"]),
             priority=int(row["priority"]),
+            links=self._row_to_links(row) if include_links else [],
         )
 
     def _row_to_search_hit(self, row: sqlite3.Row) -> TaskSearchHit:
         return TaskSearchHit(
-            task=self._row_to_list_item(row),
+            task=self._row_to_list_item(row, include_links=True),
             chunk_id=str(row["chunk_id"]),
             score=combine_search_scores(lexical_score=float(row["lexical_score"])),
             snippet=str(row["snippet"]),
         )
+
+    @staticmethod
+    def _row_to_links(row: sqlite3.Row) -> list[DocumentLinkSummary]:
+        shortcuts: list[DocumentLinkSummary] = []
+        parent_document_id = row["parent_document_id"]
+        blocked_by_document_id = row["blocked_by_document_id"]
+        if parent_document_id is not None:
+            shortcuts.append(DocumentLinkSummary(id=str(parent_document_id), type="child_of", direction="out"))
+        if blocked_by_document_id is not None:
+            shortcuts.append(DocumentLinkSummary(id=str(blocked_by_document_id), type="blocked_by", direction="out"))
+        return parse_link_summaries(row["outbound_links_json"], row["inbound_links_json"], extras=shortcuts)
 
     @staticmethod
     def _serialize_metatags(metatags: dict[str, object]) -> str:

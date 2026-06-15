@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from anchor.application.links.models import DocumentLinkSummary
 
 
 class HistoryRecord(BaseModel):
@@ -13,6 +15,7 @@ class HistoryRecord(BaseModel):
     actor: str
     payload: str
     correlation_id: str
+    links: list[DocumentLinkSummary] = Field(default_factory=list)
     created_at: str
     updated_at: str
 
@@ -23,6 +26,7 @@ class HistoryListItem(BaseModel):
     entry_type: str
     actor: str
     correlation_id: str
+    links: list[DocumentLinkSummary] = Field(default_factory=list)
     created_at: str
 
 

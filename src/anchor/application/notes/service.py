@@ -197,7 +197,9 @@ class NotesService:
         )
         results = [
             NotesSearchHit(
-                note=self.get(candidate.note.id, project=resolved_project) if view == "full" else candidate.note,
+                note=self.get(candidate.note.id, project=resolved_project)
+                if view == "full"
+                else candidate.note,
                 chunk_id=candidate.chunk_id,
                 score=combine_search_scores(
                     lexical_score=candidate.lexical_score,

@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from anchor.adapters.sqlite_ids import uuid7_str
+from anchor.adapters.sqlite_link_summaries import parse_link_summaries
 from anchor.adapters.sqlite_repository import SqliteRepositoryBase
 from anchor.adapters.sqlite_support import utc_now_iso
 from anchor.adapters.sqlite_vector_support import (
@@ -100,6 +101,26 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
                     h.actor,
                     h.payload,
                     h.correlation_id,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', to_document_id, 'type', link_type, 'direction', 'out')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE from_document_id = d.id
+                    ) AS outbound_links_json,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', from_document_id, 'type', link_type, 'direction', 'in')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE to_document_id = d.id
+                    ) AS inbound_links_json,
                     d.created_at,
                     d.updated_at
                 FROM documents AS d
@@ -351,6 +372,26 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
                     h.actor,
                     h.payload,
                     h.correlation_id,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', to_document_id, 'type', link_type, 'direction', 'out')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE from_document_id = d.id
+                    ) AS outbound_links_json,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', from_document_id, 'type', link_type, 'direction', 'in')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE to_document_id = d.id
+                    ) AS inbound_links_json,
                     d.created_at,
                     d.updated_at,
                     c.id AS chunk_id,
@@ -454,6 +495,26 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
                     h.actor,
                     h.payload,
                     h.correlation_id,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', to_document_id, 'type', link_type, 'direction', 'out')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE from_document_id = d.id
+                    ) AS outbound_links_json,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', from_document_id, 'type', link_type, 'direction', 'in')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE to_document_id = d.id
+                    ) AS inbound_links_json,
                     d.created_at,
                     d.updated_at,
                     c.id AS chunk_id,
@@ -506,6 +567,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
             actor=str(row["actor"]),
             payload=str(row["payload"]),
             correlation_id=str(row["correlation_id"]),
+            links=self._row_to_links(row),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
         )
@@ -517,8 +579,13 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
             entry_type=str(row["entry_type"]),
             actor=str(row["actor"]),
             correlation_id=str(row["correlation_id"]),
+            links=self._row_to_links(row),
             created_at=str(row["created_at"]),
         )
+
+    @staticmethod
+    def _row_to_links(row: sqlite3.Row):
+        return parse_link_summaries(row["outbound_links_json"], row["inbound_links_json"])
 
     def _row_to_chunk_record(self, row: sqlite3.Row) -> DocumentChunkRecord:
         return DocumentChunkRecord(

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from anchor.application.links.models import DocumentLinkSummary
 
 
 class NoteRecord(BaseModel):
@@ -17,6 +19,7 @@ class NoteRecord(BaseModel):
     note_kind: str
     pinned: bool
     archived_at: str | None
+    links: list[DocumentLinkSummary] = Field(default_factory=list)
     created_at: str
     updated_at: str
 
@@ -26,6 +29,7 @@ class NoteListItem(BaseModel):
     project: str
     title: str
     pinned: bool
+    links: list[DocumentLinkSummary] = Field(default_factory=list)
     created_at: str
 
 
@@ -34,6 +38,7 @@ class NoteSearchItem(BaseModel):
     project: str
     title: str
     pinned: bool
+    links: list[DocumentLinkSummary] = Field(default_factory=list)
     created_at: str
 
 

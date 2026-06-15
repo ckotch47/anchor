@@ -195,17 +195,20 @@ class TasksService:
             self._repository.search(query=query, limit=limit, project=project or self._project),
             budget_tokens if budget_tokens is not None else self._budget_tokens,
         )
-        if view == "full":
-            results = [
+        search_results: list[TaskSearchHit] = []
+        for result in results:
+            task_item = result.task
+            if view == "full":
+                task_item = self._repository.get(result.task.id, project=project or self._project) or result.task
+            search_results.append(
                 TaskSearchHit(
-                    task=self._repository.get(result.task.id, project=project or self._project) or result.task,
+                    task=task_item,
                     chunk_id=result.chunk_id,
                     score=result.score,
                     snippet=result.snippet,
                 )
-                for result in results
-            ]
-        return TasksSearchResult(query=query, count=len(results), results=results)
+            )
+        return TasksSearchResult(query=query, count=len(search_results), results=search_results)
 
     def done(self, task_id: str, *, project: str | None = None) -> TaskRecord:
         self._require_non_empty(task_id, "id")

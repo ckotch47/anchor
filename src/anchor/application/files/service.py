@@ -248,6 +248,8 @@ class FilesService:
         language: str | None = None,
         path_prefix: str | None = None,
     ) -> FilesGetResult:
+        if file_id is None and (path is None or not path.strip()):
+            raise ValueError("files delete requires --id or --path")
         resolved_project = project or self._project
         resolved_root = self._normalize_root(root)
         resolved_language = self._normalize_language(language)
@@ -313,21 +315,23 @@ class FilesService:
             deduplicated,
             budget_tokens if budget_tokens is not None else self._budget_tokens,
         )
-        results = [
-            FileSearchHit(
-                file=self._repository.get(candidate.file.id, project=resolved_project)
-                if view == "full"
-                else candidate.file,
-                chunk_id=candidate.chunk_id,
-                score=combine_search_scores(
-                    lexical_score=candidate.lexical_score,
-                    vector_score=candidate.vector_score,
-                    rerank_score=candidate.rerank_score,
-                ),
-                snippet=candidate.snippet,
+        results: list[FileSearchHit] = []
+        for candidate in trimmed[:limit]:
+            file_item = candidate.file
+            if view == "full":
+                file_item = self._repository.get(candidate.file.id, project=resolved_project) or candidate.file
+            results.append(
+                FileSearchHit(
+                    file=file_item,
+                    chunk_id=candidate.chunk_id,
+                    score=combine_search_scores(
+                        lexical_score=candidate.lexical_score,
+                        vector_score=candidate.vector_score,
+                        rerank_score=candidate.rerank_score,
+                    ),
+                    snippet=candidate.snippet,
+                )
             )
-            for candidate in trimmed[:limit]
-        ]
         stats = None
         if explain:
             stats = {

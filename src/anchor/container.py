@@ -55,25 +55,33 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
     maintenance_service = MaintenanceService(repository=SqliteMaintenanceRepository(database_path=database_path))
     migration_service = MigrationService(repository=SqliteMigrationRepository(database_path=database_path))
     health_service = HealthService(config=config, maintenance_port=maintenance_service)
+    links_service = DocumentLinksService(
+        repository=SqliteLinksRepository(database_path=database_path),
+        config=config.links,
+    )
     embedding_service = None
     rerank_service = None
     if not config.runtime.offline_only:
-        embeddings_provider = OpenAICompatibleEmbeddingsProvider(
-            base_url=config.provider.base_url,
-            api_key_env=config.provider.api_key_env,
-        )
-        rerank_provider = OpenAICompatibleRerankProvider(
-            base_url=config.provider.base_url,
-            api_key_env=config.provider.api_key_env,
-        )
-        embedding_service = EmbeddingService(
-            provider=embeddings_provider,
-            model=config.provider.embedding_model,
-        )
-        rerank_service = RerankService(
-            provider=rerank_provider,
-            model=config.provider.rerank_model,
-        )
+        embedding_model = config.provider.embedding_model.strip()
+        rerank_model = config.provider.rerank_model.strip()
+        if embedding_model:
+            embeddings_provider = OpenAICompatibleEmbeddingsProvider(
+                base_url=config.provider.base_url,
+                api_key_env=config.provider.api_key_env,
+            )
+            embedding_service = EmbeddingService(
+                provider=embeddings_provider,
+                model=embedding_model,
+            )
+        if rerank_model:
+            rerank_provider = OpenAICompatibleRerankProvider(
+                base_url=config.provider.base_url,
+                api_key_env=config.provider.api_key_env,
+            )
+            rerank_service = RerankService(
+                provider=rerank_provider,
+                model=rerank_model,
+            )
     metadata_service = MetadataSchemaService(config.metadata)
     notes_service = NotesService(
         repository=SqliteNotesRepository(database_path=database_path, vector_dimension=config.vector.dimension),
@@ -112,10 +120,6 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         chunk_size=config.vector.chunk_size,
         chunk_overlap=config.vector.chunk_overlap,
         budget_tokens=config.runtime.default_budget_tokens,
-    )
-    links_service = DocumentLinksService(
-        repository=SqliteLinksRepository(database_path=database_path),
-        config=config.links,
     )
     search_service = SearchService(
         notes_service=notes_service,

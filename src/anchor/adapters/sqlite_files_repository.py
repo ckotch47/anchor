@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from anchor.adapters.sqlite_ids import uuid7_str
+from anchor.adapters.sqlite_link_summaries import parse_link_summaries
 from anchor.adapters.sqlite_repository import SqliteRepositoryBase
 from anchor.adapters.sqlite_support import utc_now_iso
 from anchor.adapters.sqlite_vector_support import (
@@ -133,6 +134,26 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             row = connection.execute(
                 """
                 SELECT document_id, project, path, root_path, language, metatags, file_size, content_hash, mtime_ns,
+                       (
+                           SELECT COALESCE(
+                               json_group_array(
+                                   json_object('id', to_document_id, 'type', link_type, 'direction', 'out')
+                               ),
+                               '[]'
+                           )
+                           FROM document_links
+                           WHERE from_document_id = indexed_files.document_id
+                       ) AS outbound_links_json,
+                       (
+                           SELECT COALESCE(
+                               json_group_array(
+                                   json_object('id', from_document_id, 'type', link_type, 'direction', 'in')
+                               ),
+                               '[]'
+                           )
+                           FROM document_links
+                           WHERE to_document_id = indexed_files.document_id
+                       ) AS inbound_links_json,
                        created_at, updated_at, deleted_at
                 FROM indexed_files
                 WHERE document_id = ? AND project = ? AND deleted_at IS NULL
@@ -148,6 +169,26 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             row = connection.execute(
                 """
                 SELECT document_id, project, path, root_path, language, metatags, file_size, content_hash, mtime_ns,
+                       (
+                           SELECT COALESCE(
+                               json_group_array(
+                                   json_object('id', to_document_id, 'type', link_type, 'direction', 'out')
+                               ),
+                               '[]'
+                           )
+                           FROM document_links
+                           WHERE from_document_id = indexed_files.document_id
+                       ) AS outbound_links_json,
+                       (
+                           SELECT COALESCE(
+                               json_group_array(
+                                   json_object('id', from_document_id, 'type', link_type, 'direction', 'in')
+                               ),
+                               '[]'
+                           )
+                           FROM document_links
+                           WHERE to_document_id = indexed_files.document_id
+                       ) AS inbound_links_json,
                        created_at, updated_at, deleted_at
                 FROM indexed_files
                 WHERE project = ? AND path = ? AND deleted_at IS NULL
@@ -389,6 +430,26 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                     f.content_hash,
                     f.mtime_ns,
                     f.metatags,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', to_document_id, 'type', link_type, 'direction', 'out')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE from_document_id = f.document_id
+                    ) AS outbound_links_json,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', from_document_id, 'type', link_type, 'direction', 'in')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE to_document_id = f.document_id
+                    ) AS inbound_links_json,
                     f.created_at,
                     f.updated_at,
                     c.id AS chunk_id,
@@ -421,6 +482,7 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                         root_path=str(row["root_path"]),
                         language=str(row["language"]),
                         file_size=int(row["file_size"]),
+                        links=self._row_to_links(row),
                     )
                 ),
                 chunk_id=str(row["chunk_id"]),
@@ -484,14 +546,15 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                 candidates = [
                     FileSearchCandidate(
                         file=compact_file_item(
-                            FileListItem(
-                                id=str(row["document_id"]),
-                                path=str(row["path"]),
-                                root_path=str(row["root_path"]),
-                                language=str(row["language"]),
-                                file_size=int(row["file_size"]),
-                            )
-                        ),
+                        FileListItem(
+                            id=str(row["document_id"]),
+                            path=str(row["path"]),
+                            root_path=str(row["root_path"]),
+                            language=str(row["language"]),
+                            file_size=int(row["file_size"]),
+                            links=self._row_to_links(row),
+                        )
+                    ),
                         chunk_id=str(row["chunk_id"]),
                         snippet=self._build_snippet(str(row["chunk_text"])),
                         token_count=int(row["token_count"]),
@@ -519,6 +582,26 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                     f.language,
                     f.file_size,
                     f.metatags,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', to_document_id, 'type', link_type, 'direction', 'out')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE from_document_id = f.document_id
+                    ) AS outbound_links_json,
+                    (
+                        SELECT COALESCE(
+                            json_group_array(
+                                json_object('id', from_document_id, 'type', link_type, 'direction', 'in')
+                            ),
+                            '[]'
+                        )
+                        FROM document_links
+                        WHERE to_document_id = f.document_id
+                    ) AS inbound_links_json,
                     f.created_at,
                     f.updated_at,
                     c.id AS chunk_id,
@@ -551,6 +634,7 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                             root_path=str(row["root_path"]),
                             language=str(row["language"]),
                             file_size=int(row["file_size"]),
+                            links=self._row_to_links(row),
                         )
                     ),
                     chunk_id=str(row["chunk_id"]),
@@ -597,6 +681,7 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             file_size=int(row["file_size"]),
             content_hash=str(row["content_hash"]),
             mtime_ns=int(row["mtime_ns"]),
+            links=self._row_to_links(row),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
             deleted_at=row["deleted_at"],
@@ -617,6 +702,13 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             token_count=int(row["token_count"]),
             created_at=str(row["created_at"]),
         )
+
+    @staticmethod
+    def _row_to_links(row: sqlite3.Row):
+        keys = set(row.keys())
+        if "outbound_links_json" not in keys or "inbound_links_json" not in keys:
+            return []
+        return parse_link_summaries(row["outbound_links_json"], row["inbound_links_json"])
 
     def _upsert_file_in_connection(self, connection: sqlite3.Connection, file: FileIndexDraft, *, now: str) -> None:
         serialized_metatags = self._serialize_metatags(file.metatags)

@@ -13,6 +13,7 @@ def compact_note_list_item(note: NoteRecord | NoteListItem | NoteSearchItem) -> 
         project=note.project,
         title=note.title,
         pinned=note.pinned,
+        links=getattr(note, "links", []),
         created_at=note.created_at,
     )
 
@@ -25,6 +26,7 @@ def compact_note_search_item(note: NoteRecord | NoteListItem | NoteSearchItem) -
         project=note.project,
         title=note.title,
         pinned=note.pinned,
+        links=getattr(note, "links", []),
         created_at=note.created_at,
     )
 
@@ -38,6 +40,7 @@ def compact_history_item(history: HistoryRecord | HistoryListItem) -> HistoryLis
         entry_type=history.entry_type,
         actor=history.actor,
         correlation_id=history.correlation_id,
+        links=getattr(history, "links", []),
         created_at=history.created_at,
     )
 
@@ -51,4 +54,5 @@ def compact_file_item(file: IndexedFileRecord | FileListItem) -> FileListItem:
         root_path=file.root_path,
         language=file.language,
         file_size=file.file_size,
+        links=getattr(file, "links", []),
     )
