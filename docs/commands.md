@@ -60,6 +60,7 @@
 - `meta` is for execution details, not business state.
 - Retrieval commands should stay compact by default; `--view` is a request hint that is echoed in `meta` for compatibility with agent clients.
 - For `list` and `search`, `compact` returns the minimal agent payload and `full` expands the underlying domain records when the slice supports it.
+- For entity `get` and `search`, each returned item may include a compact `links` summary with `{id, type, direction}` entries so the agent can inspect nearby graph context without a second tool call.
 
 ## Per-command config
 
@@ -282,6 +283,39 @@ Example:
 
 ```bash
 anchor history delete --id <history-id> --project repo-a
+```
+
+### `anchor links add`
+
+- Creates a typed link between two document ids.
+- `--relation-type` must be one of the configured relation kinds.
+- Use this for task-to-note, note-to-history, file-to-task, and other typed graph edges.
+
+Example:
+
+```bash
+anchor links add --source-id <task-id> --target-id <note-id> --relation-type references
+```
+
+### `anchor links list`
+
+- Lists links by `--source-id` or `--target-id`.
+- Provide one anchor id to inspect the outgoing or incoming graph neighborhood.
+
+Example:
+
+```bash
+anchor links list --source-id <task-id>
+```
+
+### `anchor links delete`
+
+- Deletes a typed link by source, target, and relation type.
+
+Example:
+
+```bash
+anchor links delete --source-id <task-id> --target-id <note-id> --relation-type references
 ```
 
 ### `anchor tasks add`

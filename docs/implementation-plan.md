@@ -19,7 +19,8 @@
 - add domain-specific tables for each context
 - add shared `project` and `metatags` columns to every domain entity so all commands can scope and filter locally
 - add shared `correlation_id` on the document spine for traceable agent activity
-- add direct task-link fields for nesting and blocking, while keeping `document_links` as the general graph
+- add direct task-link fields for nesting and blocking as shortcuts, while keeping `document_links` as the general typed graph
+- add generic `links` CLI/MCP commands for typed cross-entity relations
 - add create/list/search/show/update flows
 - add link support between documents
 - add events/audit trail
@@ -84,3 +85,22 @@
    - typed tool schema over the same core use-cases
 3. Index consolidation review
    - only if measured retrieval cost warrants schema simplification
+
+## MCP parity backlog
+
+- align MCP tools with CLI command-by-command instead of keeping a looser wrapper
+- keep `CLI` as the source of truth and make `MCP` call the same application services
+- normalize `compact/full` envelopes so `structuredContent` stays minimal by default
+- mirror `notes`, `tasks`, `history`, `files`, `search`, `config`, `health`, and `db` contracts 1-1
+- align shared arguments and defaults for `--project`, `--profile`, `--view`, `--limit`, `--cursor`, and `--budget-tokens`
+- make MCP errors match CLI error codes and messages for invalid args, not found, and migration failures
+- add parity tests that assert the same behavior through CLI and MCP for the same use-cases
+
+### Suggested execution order
+
+1. Envelope parity
+2. Shared argument parity
+3. CRUD and lookup parity per domain
+4. Search parity
+5. Error parity
+6. Regression tests and docs sync

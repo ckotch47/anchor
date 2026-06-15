@@ -139,6 +139,9 @@ Fallback rules:
 - `project` and `metatags` are duplicated into every domain entity so list/search operations can scope locally without extra joins.
 - `correlation_id` is stored on the shared document spine so agent activity can be traced without adding transport-specific state.
 - `tasks` should support common task relationships directly, while `document_links` remains the richer graph for cross-entity references and follow-up context.
+- `document_links` is the universal typed graph for notes, tasks, history, and files; do not create entity-specific link tables unless a future bounded context proves it necessary.
+- Use `parent_of` / `child_of` for task hierarchy, `blocks` / `blocked_by` for execution dependencies, and `references` / `related` for soft cross-entity links.
+- `get` and `search` responses should carry a compact `links` summary on each entity item when the graph layer has neighbors, so the agent does not need a second roundtrip to inspect context.
 - `metatags` is stored as SQLite JSON text and treated as queryable metadata, not as PostgreSQL `jsonb`.
 - `metadata.entities` in config defines typed metatag schemas for entities that need validation.
 - `links.relation_types` in config defines the allowed typed relation kinds for `document_links`.

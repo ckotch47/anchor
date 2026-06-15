@@ -52,7 +52,7 @@ Anchor uses one SQLite database with a shared document spine and separate domain
 - `document_tags`
   - filtering and coarse retrieval
 - `document_links`
-  - typed context graph for related records and agent follow-up
+  - typed context graph for related records and agent follow-up across notes, tasks, history, and files
 
 Derived and operational tables:
 
@@ -78,9 +78,12 @@ Derived and operational tables:
 - `notes`, `tasks`, and `history_entries` hold domain-specific state.
 - `tasks` support one-parent nesting and one-primary-blocker references directly, while `document_links` remains the general graph for richer cross-entity relations.
 - `document_links.link_type` is the typed relation discriminator for the graph layer.
+- `document_links` is the universal link table for all document-like entities; use it for note-to-task, task-to-history, file-to-note, and other typed relations instead of introducing entity-specific link tables.
+- `parent_document_id` and `blocked_by_document_id` are task shortcuts, not a replacement for the typed graph layer.
 - `memory` is a read model over the domain tables, not a separate source of truth.
 - Derived search data must be rebuildable from the canonical tables.
 - Primary ids and opaque reference ids are UUIDv7 strings: entity ids, chunk ids, `parent_document_id`, `blocked_by_document_id`, and `correlation_id`.
+- `get` and `search` responses may include a compact `links` summary per entity item with `{ id, type, direction }` entries; the summary is derived from `document_links` plus task shortcut relations.
 
 ## Retrieval contract
 
