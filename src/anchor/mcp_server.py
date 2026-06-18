@@ -289,7 +289,7 @@ def history_append(
     entry_type: str,
     payload: str,
     actor: str = "agent",
-    correlation_id: str = "",
+    correlation_id: str | None = None,
     project: str | None = None,
     metatags: dict[str, object] | None = None,
     profile: str | None = None,

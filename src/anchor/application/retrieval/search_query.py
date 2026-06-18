@@ -53,7 +53,7 @@ def normalize_fts5_query(raw_query: str) -> str:
     tokens = _TOKEN_PATTERN.findall(raw_query)
     if not tokens:
         raise ValueError("query must not be empty")
-    return " AND ".join(tokens)
+    return " AND ".join(f'"{t}"' for t in tokens)
 
 
 def _normalize_search_types(raw_types: list[str]) -> list[str]:
