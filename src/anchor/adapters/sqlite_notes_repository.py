@@ -36,7 +36,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
         source_ref: str = "",
         pinned: bool = False,
         project: str,
-        correlation_id: str = "",
+        correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
         chunks: list[DocumentChunkDraft] | None = None,
     ) -> NoteRecord:

@@ -26,7 +26,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         source: str = "cli",
         source_ref: str = "",
         project: str,
-        correlation_id: str = "",
+        correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
         task_kind: str = "task",
         priority: int = 0,

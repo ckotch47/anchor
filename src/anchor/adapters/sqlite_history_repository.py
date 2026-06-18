@@ -33,7 +33,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
         entry_type: str,
         payload: str,
         actor: str = "agent",
-        correlation_id: str = "",
+        correlation_id: str | None = None,
         project: str,
         metatags: dict[str, object] | None = None,
         chunks: list[DocumentChunkDraft] | None = None,
@@ -41,6 +41,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
         document_id = uuid7_str()
         now = utc_now_iso()
         serialized_metatags = self._serialize_metatags(metatags or {})
+        resolved_correlation_id = correlation_id or uuid7_str()
         body_value = payload.strip()
         if not body_value:
             raise ValueError("payload must not be empty")
@@ -56,10 +57,10 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
                     document_id,
                     project,
                     serialized_metatags,
-                    correlation_id,
+                    resolved_correlation_id,
                     entry_type,
                     body_value,
-                    correlation_id,
+                    resolved_correlation_id,
                     now,
                     now,
                 ),
@@ -71,7 +72,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (document_id, project, serialized_metatags, entry_type, actor, body_value, correlation_id),
+                (document_id, project, serialized_metatags, entry_type, actor, body_value, resolved_correlation_id),
             )
             self._write_chunks(
                 connection,
