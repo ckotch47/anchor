@@ -1,4 +1,4 @@
-.PHONY: help venv install build lint test run clean
+.PHONY: help venv install build lint test run serve clean
 
 PYTHON ?= python3
 VENV ?= .venv
@@ -34,6 +34,9 @@ test: install
 
 run: install
 	$(ANCHOR) --help
+
+serve: install
+	$(ANCHOR) serve
 
 clean:
 	rm -rf $(VENV) build dist *.egg-info

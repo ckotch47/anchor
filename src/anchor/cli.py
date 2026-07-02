@@ -9,7 +9,9 @@ from anchor.cli_files import files_app, files_delete, files_get, files_index, fi
 from anchor.cli_history import history_app, history_append, history_delete, history_search, history_update
 from anchor.cli_links import links_add, links_app, links_delete, links_list
 from anchor.cli_notes import notes_add, notes_app, notes_delete, notes_get, notes_list, notes_search, notes_update
+from anchor.cli_projects import projects_app, projects_list
 from anchor.cli_search import search_command
+from anchor.cli_serve import serve
 from anchor.cli_shared import response_formatter
 from anchor.cli_tasks import (
     tasks_add,
@@ -30,6 +32,7 @@ app.add_typer(history_app, name="history")
 app.add_typer(files_app, name="files")
 app.add_typer(links_app, name="links")
 app.add_typer(tasks_app, name="tasks")
+app.add_typer(projects_app, name="projects")
 app.command(name="search")(search_command)
 
 __all__ = [
@@ -57,7 +60,10 @@ __all__ = [
     "notes_list",
     "notes_search",
     "notes_update",
+    "projects_app",
+    "projects_list",
     "search",
+    "serve_command",
     "tasks_add",
     "tasks_delete",
     "tasks_done",
@@ -200,6 +206,16 @@ def db_command(
 @app.command(name="mcp")
 def mcp_command() -> None:
     run_stdio()
+
+
+@app.command(name="serve")
+def serve_command(
+    host: str = "127.0.0.1",
+    port: int = 9080,
+    profile: str | None = None,
+    open_browser: bool = True,
+) -> None:
+    serve(host=host, port=port, profile=profile, open_browser=open_browser)
 
 
 def _handle_db_migrate(container: Any) -> None:

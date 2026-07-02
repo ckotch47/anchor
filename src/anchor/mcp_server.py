@@ -9,6 +9,7 @@ from anchor.application.files.models import FilesGetResult, FilesListResult
 from anchor.application.history.models import HistorySearchResult
 from anchor.application.links.models import DocumentLinkListResult
 from anchor.application.retrieval.search_query import SearchQuery
+from anchor.application.system.projects_service import ProjectsListResult
 from anchor.cli_shared import resolve_project, resolve_view, response_formatter
 from anchor.container import build_container
 
@@ -809,6 +810,20 @@ def search(
         )
     except ValueError as exc:
         return _failure("search", "INVALID_ARGS", str(exc), container)
+
+
+@mcp_app.tool(name="projects_list", description="List all available projects")
+def projects_list(profile: str | None = None) -> dict[str, Any]:
+    container = _container(profile)
+    result: ProjectsListResult = container.projects_service.list_projects()
+    return CallToolResult(
+        content=[],
+        structuredContent=response_formatter.format_success(
+            "projects.list",
+            {"count": result.count, "projects": result.projects},
+            container,
+        ),
+    )
 
 
 def run_stdio() -> None:

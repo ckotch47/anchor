@@ -9,6 +9,7 @@ from anchor.adapters.sqlite_links_repository import SqliteLinksRepository
 from anchor.adapters.sqlite_maintenance_repository import SqliteMaintenanceRepository
 from anchor.adapters.sqlite_migration_repository import SqliteMigrationRepository
 from anchor.adapters.sqlite_notes_repository import SqliteNotesRepository
+from anchor.adapters.sqlite_projects_repository import SqliteProjectsRepository
 from anchor.adapters.sqlite_tasks_repository import SqliteTasksRepository
 from anchor.application.embeddings.provider_service import OpenAICompatibleEmbeddingsProvider
 from anchor.application.embeddings.service import EmbeddingService
@@ -26,6 +27,7 @@ from anchor.application.system.health_service import HealthService
 from anchor.application.system.maintenance_service import MaintenanceService
 from anchor.application.system.metadata_service import MetadataSchemaService
 from anchor.application.system.migration_service import MigrationService
+from anchor.application.system.projects_service import ProjectsService
 from anchor.application.tasks.service import TasksService
 from anchor.config import AppConfig, default_database_path
 
@@ -45,6 +47,7 @@ class Container:
     files_service: FilesService
     search_service: SearchService
     links_service: DocumentLinksService
+    projects_service: ProjectsService
 
 
 def build_container(profile: str | None = None, auto_migrate: bool = True) -> Container:
@@ -129,6 +132,9 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         embedding_service=embedding_service,
         budget_tokens=config.runtime.default_budget_tokens,
     )
+    projects_service = ProjectsService(
+        repository=SqliteProjectsRepository(database_path=database_path),
+    )
     if auto_migrate:
         migration_service.migrate()
     return Container(
@@ -145,4 +151,5 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         files_service=files_service,
         search_service=search_service,
         links_service=links_service,
+        projects_service=projects_service,
     )
