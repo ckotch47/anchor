@@ -50,13 +50,12 @@ class NotesService:
         source_ref: str = "",
         pinned: bool = False,
         project: str | None = None,
-        correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
     ) -> NoteRecord:
         self._require_non_empty(title, "title")
         self._require_non_empty(body, "body")
         resolved_project = project or self._project
-        resolved_correlation_id = self._resolve_correlation_id(correlation_id)
+        resolved_correlation_id = uuid7_str()
         self._validate_metatags("notes", metatags or {})
         chunks = self._chunking_service.chunk_note(title=title, body=body)
         result = self._repository.create(
@@ -216,12 +215,6 @@ class NotesService:
     def _require_non_empty(value: str, field: str) -> None:
         if not value.strip():
             raise ValueError(f"{field} must not be empty")
-
-    def _resolve_correlation_id(self, correlation_id: str | None) -> str:
-        if correlation_id is None or not correlation_id.strip():
-            return uuid7_str()
-        self._validate_correlation_id(correlation_id)
-        return correlation_id
 
     @staticmethod
     def _validate_correlation_id(correlation_id: str) -> None:

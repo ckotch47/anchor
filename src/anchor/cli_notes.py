@@ -20,7 +20,6 @@ def notes_add(
     source_ref: Annotated[str, typer.Option("--source-ref")] = "",
     pinned: Annotated[bool, typer.Option("--pinned")] = False,
     project: Annotated[str | None, typer.Option("--project")] = None,
-    correlation_id: Annotated[str | None, typer.Option("--correlation-id")] = None,
     metatags: Annotated[str | None, typer.Option("--metatags")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
@@ -34,7 +33,6 @@ def notes_add(
             source_ref=source_ref,
             pinned=pinned,
             project=resolved_project,
-            correlation_id=correlation_id,
             metatags=parse_metatags(metatags),
         )
         typer.echo(

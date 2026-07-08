@@ -5,6 +5,7 @@ from typing import Annotated, Any
 
 import typer
 
+from anchor import __version__
 from anchor.cli_files import files_app, files_delete, files_get, files_index, files_list, files_search
 from anchor.cli_history import history_app, history_append, history_delete, history_search, history_update
 from anchor.cli_links import links_add, links_app, links_delete, links_list
@@ -27,6 +28,7 @@ from anchor.container import build_container
 from anchor.mcp_server import run_stdio
 
 app = typer.Typer(add_completion=False, help="Qatoria Anchor")
+
 app.add_typer(notes_app, name="notes")
 app.add_typer(history_app, name="history")
 app.add_typer(files_app, name="files")
@@ -74,6 +76,22 @@ __all__ = [
 ]
 
 search = search_command
+
+
+app = typer.Typer(add_completion=False, help="Qatoria Anchor")
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"anchor v{__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(False, "--version", callback=_version_callback, is_eager=True, help="Show version"),
+) -> None:
+    pass
 
 
 @app.command()

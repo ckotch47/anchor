@@ -160,7 +160,6 @@ def notes_add(
     source_ref: str = "",
     pinned: bool = False,
     project: str | None = None,
-    correlation_id: str | None = None,
     metatags: dict[str, object] | None = None,
     profile: str | None = None,
 ) -> dict[str, Any]:
@@ -173,7 +172,6 @@ def notes_add(
         source_ref=source_ref,
         pinned=pinned,
         project=resolved_project,
-        correlation_id=correlation_id,
         metatags=metatags or {},
     )
     return _tool_result("notes.add", {"note": result.model_dump()}, container, project=resolved_project)
@@ -290,7 +288,6 @@ def history_append(
     entry_type: str,
     payload: str,
     actor: str = "agent",
-    correlation_id: str | None = None,
     project: str | None = None,
     metatags: dict[str, object] | None = None,
     profile: str | None = None,
@@ -301,7 +298,6 @@ def history_append(
         entry_type=entry_type,
         payload=payload,
         actor=actor,
-        correlation_id=correlation_id,
         project=resolved_project,
         metatags=metatags or {},
     )
@@ -388,7 +384,6 @@ def tasks_add(
     body: str = "",
     source: str = "cli",
     source_ref: str = "",
-    correlation_id: str | None = None,
     priority: int = 0,
     due_at: str | None = None,
     task_kind: str = "task",
@@ -405,7 +400,6 @@ def tasks_add(
         body=body,
         source=source,
         source_ref=source_ref,
-        correlation_id=correlation_id,
         project=resolved_project,
         metatags=metatags or {},
         task_kind=task_kind,

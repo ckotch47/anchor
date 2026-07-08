@@ -145,36 +145,6 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(_structured(files_list_payload)["meta"]["view"], "full")
         self.assertEqual(_structured(files_search_payload)["meta"]["view"], "full")
 
-    def test_mcp_notes_support_correlation_id(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "config.toml"
-            db_path = Path(tmpdir) / "anchor.sqlite3"
-            correlation_id = uuid7_str()
-            with patch("anchor.config.default_config_path", return_value=config_path):
-                with patch("anchor.container.default_database_path", return_value=db_path):
-                    created = _structured(
-                        notes_add(
-                            title="Note",
-                            body="Body text",
-                            source="cli",
-                            project="repo-a",
-                            correlation_id=correlation_id,
-                        )
-                    )
-                    note_id = created["data"]["note"]["id"]
-                    updated = _structured(
-                        notes_update(
-                            note_id=note_id,
-                            body="Body text two",
-                            project="repo-a",
-                            correlation_id=correlation_id,
-                        )
-                    )
-
-        self.assertEqual(created["data"]["note"]["correlation_id"], correlation_id)
-        self.assertEqual(updated["data"]["note"]["correlation_id"], correlation_id)
-        self.assertEqual(note_id, created["data"]["note"]["id"])
-
     def test_mcp_notes_update_returns_not_found(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.toml"

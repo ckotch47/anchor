@@ -46,14 +46,13 @@ class HistoryService:
         entry_type: str,
         payload: str,
         actor: str = "agent",
-        correlation_id: str | None = None,
         project: str | None = None,
         metatags: dict[str, object] | None = None,
     ) -> HistoryRecord:
         self._require_non_empty(entry_type, "entry_type")
         self._require_non_empty(payload, "payload")
         resolved_project = project or self._project
-        resolved_correlation_id = self._resolve_correlation_id(correlation_id)
+        resolved_correlation_id = uuid7_str()
         self._validate_metatags("history", metatags or {})
         chunks = self._chunking_service.chunk_note(title=entry_type, body=payload)
         result = self._repository.append(
@@ -169,17 +168,6 @@ class HistoryService:
             for candidate in trimmed[:limit]
         ]
         return HistorySearchResult(query=query, count=len(results), results=results)
-
-    @staticmethod
-    def _resolve_correlation_id(correlation_id: str | None) -> str:
-        if correlation_id is None or not correlation_id.strip():
-            return uuid7_str()
-        HistoryService._validate_correlation_id(correlation_id)
-        return correlation_id
-
-    @staticmethod
-    def _validate_correlation_id(correlation_id: str) -> None:
-        ensure_uuid7_str(correlation_id, "correlation_id")
 
     @staticmethod
     def _require_non_empty(value: str, field: str) -> None:

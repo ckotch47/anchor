@@ -31,7 +31,6 @@ class TasksService:
         source: str = "cli",
         source_ref: str = "",
         project: str | None = None,
-        correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
         task_kind: str = "task",
         priority: int = 0,
@@ -45,7 +44,7 @@ class TasksService:
             ensure_uuid7_str(parent_document_id, "parent_document_id")
         if blocked_by_document_id is not None:
             ensure_uuid7_str(blocked_by_document_id, "blocked_by_document_id")
-        resolved_correlation_id = self._resolve_correlation_id(correlation_id)
+        resolved_correlation_id = uuid7_str()
         self._validate_metatags("tasks", metatags or {})
         result = self._repository.create(
             title=title,
@@ -228,16 +227,6 @@ class TasksService:
     def _require_non_empty(value: str, field: str) -> None:
         if not value.strip():
             raise ValueError(f"{field} must not be empty")
-
-    @staticmethod
-    def _validate_correlation_id(correlation_id: str) -> None:
-        ensure_uuid7_str(correlation_id, "correlation_id")
-
-    def _resolve_correlation_id(self, correlation_id: str | None) -> str:
-        if correlation_id is None or not correlation_id.strip():
-            return uuid7_str()
-        self._validate_correlation_id(correlation_id)
-        return correlation_id
 
     def _validate_metatags(self, entity_type: str, metatags: dict[str, object]) -> None:
         if self._metadata_service is None:

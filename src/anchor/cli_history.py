@@ -17,7 +17,6 @@ def history_append(
     entry_type: Annotated[str, typer.Option("--entry-type")],
     payload: Annotated[str, typer.Option("--payload")],
     actor: Annotated[str, typer.Option("--actor")] = "agent",
-    correlation_id: Annotated[str | None, typer.Option("--correlation-id")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     metatags: Annotated[str | None, typer.Option("--metatags")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
@@ -29,7 +28,6 @@ def history_append(
             entry_type=entry_type,
             payload=payload,
             actor=actor,
-            correlation_id=correlation_id,
             project=resolved_project,
             metatags=parse_metatags(metatags),
         )

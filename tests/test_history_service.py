@@ -245,17 +245,6 @@ class HistoryServiceTest(unittest.TestCase):
         self.assertEqual(repo.pending_embedding_ids, [])
         self.assertGreater(len(repo.stored_embeddings), 0)
 
-    def test_append_rejects_non_uuidv7_correlation_id(self) -> None:
-        repo = FakeHistoryRepository()
-        service = HistoryService(
-            repository=repo,
-            chunking_service=DocumentChunkingService(),
-            project="workspace",
-        )
-
-        with self.assertRaises(ValueError):
-            service.append(entry_type="deploy", payload="one two three", correlation_id="not-a-uuid", project="repo-a")
-
     def test_delete_removes_history_entry(self) -> None:
         repo = FakeHistoryRepository()
         service = HistoryService(
