@@ -5,4 +5,5 @@
 - [ADR-003: Hybrid retrieval and rerank](./003-hybrid-search-and-rerank.md)
 - [ADR-004: Machine-readable CLI contract](./004-machine-readable-cli-contract.md)
 - [ADR-005: OpenAI-compatible provider integration](./005-openai-compatible-provider.md)
+- [ADR-006: Hierarchical memory with global and project scopes](./006-hierarchical-memory-scope.md)
 - [Production architecture](../production-architecture.md)

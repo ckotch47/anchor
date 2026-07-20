@@ -22,6 +22,27 @@ class FakeHistoryRepository:
         self.stored_embeddings: list[ChunkEmbeddingRecord] = []
         self.pending_embedding_ids: list[str] = []
         self.deleted: HistoryRecord | None = None
+        self.batch_state: dict[str, object] = {}
+
+    def get_batch_state(self, *, project: str, chat_id: str | None):
+        del project, chat_id
+        return dict(self.batch_state) if self.batch_state else None
+
+    def save_batch_state(
+        self,
+        *,
+        project: str,
+        chat_id: str | None,
+        pending_count: int,
+        pending_since: float | None,
+        last_extraction_at: float | None,
+    ) -> None:
+        del project, chat_id
+        self.batch_state = {
+            "pending_count": pending_count,
+            "pending_since": pending_since,
+            "last_extraction_at": last_extraction_at,
+        }
 
     def append(
         self,
@@ -192,6 +213,72 @@ class FakeRerankProvider:
 
 
 class HistoryServiceTest(unittest.TestCase):
+    def test_append_does_not_depend_on_automatic_memory_extraction(self) -> None:
+        repo = FakeHistoryRepository()
+        service = HistoryService(
+            repository=repo,
+            chunking_service=DocumentChunkingService(),
+            project="workspace",
+            embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="test-embed"),
+        )
+        calls: list[dict[str, object]] = []
+
+        def failing_extractor(**kwargs: object) -> None:
+            calls.append(kwargs)
+            raise RuntimeError("provider unavailable")
+
+        service.configure_memory_extraction(failing_extractor, enabled=True)
+
+        history = service.append(entry_type="deploy", payload="one two three", project="repo-a")
+
+        self.assertEqual(history.id, HISTORY_ID)
+        self.assertEqual(calls, [{"project": "repo-a", "limit": 1}])
+
+    def test_automatic_memory_extraction_batches_appends(self) -> None:
+        repo = FakeHistoryRepository()
+        service = HistoryService(
+            repository=repo,
+            chunking_service=DocumentChunkingService(),
+            project="workspace",
+            embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="test-embed"),
+        )
+        calls: list[dict[str, object]] = []
+        service.configure_memory_extraction(
+            lambda **kwargs: calls.append(kwargs),
+            enabled=True,
+            batch_size=2,
+            min_interval_seconds=60,
+        )
+
+        service.append(entry_type="deploy", payload="first", project="repo-a")
+        self.assertEqual(calls, [])
+        service.append(entry_type="deploy", payload="second", project="repo-a")
+
+        self.assertEqual(calls, [{"project": "repo-a", "limit": 2}])
+
+    def test_flush_runs_pending_batch_and_resets_state(self) -> None:
+        repo = FakeHistoryRepository()
+        service = HistoryService(
+            repository=repo,
+            chunking_service=DocumentChunkingService(),
+            project="workspace",
+            embedding_service=EmbeddingService(provider=FakeEmbeddingsProvider(), model="test-embed"),
+        )
+        calls: list[dict[str, object]] = []
+        service.configure_memory_extraction(
+            lambda **kwargs: calls.append(kwargs) or {"ok": True},
+            enabled=True,
+            batch_size=10,
+            min_interval_seconds=60,
+        )
+        service.append(entry_type="deploy", payload="pending", project="repo-a")
+
+        result = service.flush_memory_extraction(project="repo-a")
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(calls, [{"project": "repo-a", "limit": 1}])
+        self.assertEqual(repo.batch_state["pending_count"], 0)
+
     def test_append_queues_embeddings(self) -> None:
         repo = FakeHistoryRepository()
         service = HistoryService(

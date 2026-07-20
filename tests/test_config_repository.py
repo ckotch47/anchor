@@ -93,8 +93,8 @@ class ConfigRepositoryTest(unittest.TestCase):
                 task_columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)").fetchall()}
                 document_columns = {row[1] for row in connection.execute("PRAGMA table_info(documents)").fetchall()}
 
-        self.assertEqual(result.applied, 7)
-        self.assertEqual(result.current_version, 7)
+            self.assertEqual(result.applied, 10)
+        self.assertEqual(result.current_version, 10)
         self.assertIn("schema_migrations", tables)
         self.assertIn("documents", tables)
         self.assertIn("notes", tables)
@@ -111,6 +111,11 @@ class ConfigRepositoryTest(unittest.TestCase):
         self.assertIn("events", tables)
         self.assertIn("settings", tables)
         self.assertIn("index_states", tables)
+        self.assertIn("memory_facts", tables)
+        self.assertIn("memory_facts_fts", tables)
+        self.assertIn("memory_pipeline_checkpoints", tables)
+        self.assertIn("memory_scenarios", tables)
+        self.assertIn("memory_scenarios_fts", tables)
         self.assertNotIn("items", tables)
         self.assertIn("document_type", fts_columns)
         self.assertIn("task_kind", task_columns)
@@ -118,4 +123,4 @@ class ConfigRepositoryTest(unittest.TestCase):
         self.assertIn("parent_document_id", task_columns)
         self.assertIn("blocked_by_document_id", task_columns)
         self.assertIn("correlation_id", document_columns)
-        self.assertEqual(version_rows, [(1,), (2,), (3,), (4,), (5,), (6,), (7,)])
+        self.assertEqual(version_rows, [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,)])

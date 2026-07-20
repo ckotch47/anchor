@@ -510,8 +510,17 @@ anchor tasks delete --id <task-id> --project repo-a
 ## Target command set
 
 - `anchor memory capture`
+- `anchor memory extract`
+- `anchor memory flush`
 - `anchor memory search`
 - `anchor memory recall`
+- `anchor memory context`
+- `anchor memory evidence`
+- `anchor memory scenarios`
+- `anchor memory conflicts`
+- `anchor memory metrics`
+- `anchor memory promote`
+- `anchor memory status`
 - `anchor notes add`
 - `anchor notes update`
 - `anchor notes search`
@@ -548,6 +557,24 @@ anchor tasks delete --id <task-id> --project repo-a
 - `history` and `tasks` reuse the same core for their current slices and future extensions.
 - Each domain owns its table(s), while search uses shared document spine + derived retrieval tables.
 - `project` and `metatags` are part of the target contract for all domain entities and should be respected by list/search commands.
+- `memory` facts support `chat`, `project`, and `global` visibility scopes. Default recall combines global facts with the current project and chat.
+- Global facts are derived projections and must retain `evidence_refs`; project-specific facts are not copied into global memory automatically.
+- `memory search` supports `--scope`, `--project`, repeated `--projects`, `--chat-id`, `--fact-type`, and repeated `--status` filters.
+- `memory capture` creates a candidate fact by default. Promotion to `global` requires evidence and is explicit through `memory promote`.
+- `memory capture` deduplicates equal active/candidate facts within the same visibility boundary and merges their evidence; replacements must use `--supersedes-id` and are atomic.
+- `memory extract` processes only history newer than its project/chat checkpoint, creates active L1 facts, and writes one L2 scenario when the provider returns facts.
+- `memory context` formats active global, current-project, and current-chat facts for direct injection into an agent prompt without exposing other projects. `--budget-tokens` bounds the generated context and defaults to `runtime.default_budget_tokens`.
+- `memory evidence` resolves a fact's evidence references to live canonical notes, tasks, history, or file/chunk records; deleted or cross-project evidence is returned as not found.
+- `memory scenarios` searches active L2 scenario summaries in global and current-project scope.
+- `memory conflicts` is a read-only review surface for facts explicitly marked `conflicted`; it never infers conflicts from fact type alone.
+- `memory metrics` reports fact/scenario status counts, broken canonical evidence references, external evidence refs (`implementation:`, `tests:`, `smoke:`, `migration:`, `security:`, `safety:`, `metrics:`, `release:`), pending extraction count, explicit conflicts, and extraction checkpoint states.
+- `memory flush` forces the pending automatic extraction batch to run immediately.
+- `memory flush --dry-run` previews pending entries after redaction and never calls the external provider.
+- Automatic extraction after `history append` is disabled by default. Enable it with `runtime.memory_auto_extract = true`; a model failure is logged and never rolls back the canonical history write.
+- External provider transmission additionally requires `runtime.memory_external_send = true` and the project to be present in `runtime.memory_external_projects`; disabled or non-allowlisted projects never send history outside the local database.
+- Set `runtime.memory_external_projects = ["*"]` for an explicit all-projects policy. An empty list remains deny-all.
+- When enabled, automatic extraction batches up to `runtime.memory_extract_batch_size` entries and waits at least `runtime.memory_extract_min_interval_seconds` between model calls.
+- Extraction is explicit and provider-backed; with `runtime.offline_only = true` it returns `PROVIDER_OFFLINE` without changing memory.
 - Mutable domain entities should expose partial `update` commands with the same project-scoped contract.
 - Semantic vector retrieval and rerank are first-class layers on top of that core, not a separate database.
 

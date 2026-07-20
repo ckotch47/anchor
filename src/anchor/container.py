@@ -7,6 +7,7 @@ from anchor.adapters.sqlite_files_repository import SqliteFilesRepository
 from anchor.adapters.sqlite_history_repository import SqliteHistoryRepository
 from anchor.adapters.sqlite_links_repository import SqliteLinksRepository
 from anchor.adapters.sqlite_maintenance_repository import SqliteMaintenanceRepository
+from anchor.adapters.sqlite_memory_repository import SqliteMemoryRepository
 from anchor.adapters.sqlite_migration_repository import SqliteMigrationRepository
 from anchor.adapters.sqlite_notes_repository import SqliteNotesRepository
 from anchor.adapters.sqlite_projects_repository import SqliteProjectsRepository
@@ -17,6 +18,8 @@ from anchor.application.files.chunking import FileChunkingService
 from anchor.application.files.service import FilesService
 from anchor.application.history.service import HistoryService
 from anchor.application.links.service import DocumentLinksService
+from anchor.application.memory.provider_service import OpenAICompatibleMemoryExtractionProvider
+from anchor.application.memory.service import MemoryService
 from anchor.application.notes.service import NotesService
 from anchor.application.retrieval.document_chunking import DocumentChunkingService
 from anchor.application.retrieval.rerank_provider_service import OpenAICompatibleRerankProvider
@@ -47,6 +50,7 @@ class Container:
     files_service: FilesService
     search_service: SearchService
     links_service: DocumentLinksService
+    memory_service: MemoryService
     projects_service: ProjectsService
 
 
@@ -135,6 +139,27 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
     projects_service = ProjectsService(
         repository=SqliteProjectsRepository(database_path=database_path),
     )
+    memory_service = MemoryService(
+        repository=SqliteMemoryRepository(database_path=database_path),
+        project=config.runtime.default_project,
+        budget_tokens=config.runtime.default_budget_tokens,
+    )
+    if not config.runtime.offline_only and config.provider.memory_model.strip():
+        memory_service.configure_extraction(
+            OpenAICompatibleMemoryExtractionProvider(
+                base_url=config.provider.base_url,
+                api_key_env=config.provider.api_key_env,
+            ),
+            model=config.provider.memory_model,
+            external_send_allowed=config.runtime.memory_external_send,
+            external_projects=config.runtime.memory_external_projects,
+        )
+    history_service.configure_memory_extraction(
+        memory_service.extract,
+        enabled=config.runtime.memory_auto_extract and config.runtime.memory_external_send,
+        batch_size=config.runtime.memory_extract_batch_size,
+        min_interval_seconds=config.runtime.memory_extract_min_interval_seconds,
+    )
     if auto_migrate:
         migration_service.migrate()
     return Container(
@@ -151,5 +176,6 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
         files_service=files_service,
         search_service=search_service,
         links_service=links_service,
+        memory_service=memory_service,
         projects_service=projects_service,
     )

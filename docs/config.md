@@ -24,12 +24,20 @@ default_budget_tokens = 800
 retry_attempts = 3
 busy_timeout_ms = 250
 offline_only = true
+memory_auto_extract = false
+memory_external_send = false
+memory_external_projects = []
+memory_extract_batch_size = 10
+memory_extract_min_interval_seconds = 60
+
+# Use ["*"] only for an explicit all-projects external-send policy.
 
 [provider]
 base_url = "https://api.example.com/v1"
 api_key_env = "OPENAI_API_KEY"
 embedding_model = "text-embedding-3-small"
 rerank_model = "gpt-5.5"
+memory_model = ""
 
 [metadata]
 enabled = true
@@ -82,6 +90,7 @@ limit = 50
 - config should carry the canonical relation types for the document graph;
 - config should carry default project scope, and CLI `--project` should override it per command;
 - provider URL may point to a local OpenAI-compatible endpoint;
+- `provider.memory_model` enables explicit `memory extract` L1/L2 generation when `offline_only = false`;
 - when `runtime.offline_only = true`, generation layers should stay inactive and retrieval should degrade to non-generative paths;
 - profiles are optional and live in the same file.
 

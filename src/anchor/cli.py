@@ -9,6 +9,21 @@ from anchor import __version__
 from anchor.cli_files import files_app, files_delete, files_get, files_index, files_list, files_search
 from anchor.cli_history import history_app, history_append, history_delete, history_search, history_update
 from anchor.cli_links import links_add, links_app, links_delete, links_list
+from anchor.cli_memory import (
+    memory_app,
+    memory_capture,
+    memory_conflicts,
+    memory_context,
+    memory_evidence,
+    memory_extract,
+    memory_flush,
+    memory_metrics,
+    memory_promote,
+    memory_recall,
+    memory_scenarios,
+    memory_search,
+    memory_status,
+)
 from anchor.cli_notes import notes_add, notes_app, notes_delete, notes_get, notes_list, notes_search, notes_update
 from anchor.cli_projects import projects_app, projects_list
 from anchor.cli_search import search_command
@@ -26,16 +41,6 @@ from anchor.cli_tasks import (
 )
 from anchor.container import build_container
 from anchor.mcp_server import run_stdio
-
-app = typer.Typer(add_completion=False, help="Qatoria Anchor")
-
-app.add_typer(notes_app, name="notes")
-app.add_typer(history_app, name="history")
-app.add_typer(files_app, name="files")
-app.add_typer(links_app, name="links")
-app.add_typer(tasks_app, name="tasks")
-app.add_typer(projects_app, name="projects")
-app.command(name="search")(search_command)
 
 __all__ = [
     "app",
@@ -56,6 +61,19 @@ __all__ = [
     "links_delete",
     "links_list",
     "mcp_command",
+    "memory_app",
+    "memory_capture",
+    "memory_conflicts",
+    "memory_context",
+    "memory_evidence",
+    "memory_extract",
+    "memory_flush",
+    "memory_metrics",
+    "memory_promote",
+    "memory_recall",
+    "memory_scenarios",
+    "memory_search",
+    "memory_status",
     "notes_add",
     "notes_delete",
     "notes_get",
@@ -79,6 +97,15 @@ search = search_command
 
 
 app = typer.Typer(add_completion=False, help="Qatoria Anchor")
+
+app.add_typer(notes_app, name="notes")
+app.add_typer(history_app, name="history")
+app.add_typer(files_app, name="files")
+app.add_typer(links_app, name="links")
+app.add_typer(tasks_app, name="tasks")
+app.add_typer(projects_app, name="projects")
+app.add_typer(memory_app, name="memory")
+app.command(name="search")(search_command)
 
 
 def _version_callback(value: bool) -> None:

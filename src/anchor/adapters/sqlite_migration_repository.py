@@ -329,6 +329,99 @@ CREATE INDEX IF NOT EXISTS idx_file_chunks_project_path_chunk_index ON file_chun
 ALTER TABLE documents ADD COLUMN correlation_id TEXT NOT NULL DEFAULT '';
 """.strip(),
     ),
+    Migration(
+        version=8,
+        name="0008_memory_facts",
+        sql="""
+CREATE TABLE IF NOT EXISTS memory_facts (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL CHECK (scope IN ('chat', 'project', 'global')),
+    project TEXT,
+    source_chat_id TEXT,
+    fact_type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    confidence REAL NOT NULL CHECK (confidence >= 0.0 AND confidence <= 1.0),
+    status TEXT NOT NULL CHECK (status IN ('candidate', 'active', 'superseded', 'conflicted', 'deleted')),
+    evidence_refs TEXT NOT NULL DEFAULT '[]',
+    valid_from TEXT,
+    valid_until TEXT,
+    supersedes_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (supersedes_id) REFERENCES memory_facts(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_facts_scope ON memory_facts(scope);
+CREATE INDEX IF NOT EXISTS idx_memory_facts_project ON memory_facts(project);
+CREATE INDEX IF NOT EXISTS idx_memory_facts_source_chat_id ON memory_facts(source_chat_id);
+CREATE INDEX IF NOT EXISTS idx_memory_facts_status ON memory_facts(status);
+CREATE INDEX IF NOT EXISTS idx_memory_facts_fact_type ON memory_facts(fact_type);
+CREATE INDEX IF NOT EXISTS idx_memory_facts_supersedes_id ON memory_facts(supersedes_id);
+CREATE INDEX IF NOT EXISTS idx_memory_facts_status_updated_at_id
+    ON memory_facts(status, updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_facts_project_status_updated_at_id
+    ON memory_facts(project, status, updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_facts_source_chat_status_updated_at_id
+    ON memory_facts(source_chat_id, status, updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_facts_type_status_updated_at_id
+    ON memory_facts(fact_type, status, updated_at DESC, id DESC);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_facts_fts USING fts5(
+    fact_id UNINDEXED,
+    content
+);
+""".strip(),
+    ),
+    Migration(
+        version=9,
+        name="0009_memory_pipeline_and_scenarios",
+        sql="""
+CREATE TABLE IF NOT EXISTS memory_pipeline_checkpoints (
+    pipeline_key TEXT PRIMARY KEY,
+    project TEXT NOT NULL,
+    chat_id TEXT,
+    last_history_updated_at TEXT,
+    last_run_at TEXT,
+    processed_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL CHECK (status IN ('idle', 'running', 'completed', 'error')),
+    last_error TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS memory_scenarios (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL CHECK (scope IN ('project', 'global')),
+    project TEXT,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    fact_ids TEXT NOT NULL DEFAULT '[]',
+    evidence_refs TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL CHECK (status IN ('active', 'superseded', 'deleted')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_pipeline_project_chat ON memory_pipeline_checkpoints(project, chat_id);
+CREATE INDEX IF NOT EXISTS idx_memory_pipeline_status ON memory_pipeline_checkpoints(status);
+CREATE INDEX IF NOT EXISTS idx_memory_scenarios_scope_project_status ON memory_scenarios(scope, project, status);
+CREATE INDEX IF NOT EXISTS idx_memory_scenarios_updated_at_id ON memory_scenarios(updated_at DESC, id DESC);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_scenarios_fts USING fts5(
+    scenario_id UNINDEXED,
+    title,
+    summary
+);
+""".strip(),
+    ),
+    Migration(
+        version=10,
+        name="0010_memory_extraction_batch_state",
+        sql="""
+ALTER TABLE memory_pipeline_checkpoints ADD COLUMN pending_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE memory_pipeline_checkpoints ADD COLUMN pending_since REAL;
+ALTER TABLE memory_pipeline_checkpoints ADD COLUMN last_extraction_at REAL;
+""".strip(),
+    ),
 ]
 
 

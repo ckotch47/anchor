@@ -6,6 +6,7 @@ from pathlib import Path
 
 from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.adapters.sqlite_link_summaries import parse_link_summaries
+from anchor.adapters.sqlite_memory_repository import invalidate_memory_facts_for_evidence
 from anchor.adapters.sqlite_repository import SqliteRepositoryBase
 from anchor.adapters.sqlite_support import utc_now_iso
 from anchor.application.links.models import DocumentLinkSummary
@@ -387,6 +388,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                 (task_id,),
             )
             connection.commit()
+        invalidate_memory_facts_for_evidence(self._database_path, [task_id])
         return current
 
     def search(self, query: str, limit: int, *, project: str) -> list[TaskSearchHit]:

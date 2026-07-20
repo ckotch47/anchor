@@ -14,6 +14,11 @@ class RuntimeConfig(BaseModel):
     retry_attempts: int = 3
     busy_timeout_ms: int = 250
     offline_only: bool = True
+    memory_auto_extract: bool = False
+    memory_external_send: bool = False
+    memory_external_projects: list[str] = Field(default_factory=list)
+    memory_extract_batch_size: int = Field(default=10, gt=0)
+    memory_extract_min_interval_seconds: float = Field(default=60.0, ge=0.0)
 
 
 class ProviderConfig(BaseModel):
@@ -21,6 +26,7 @@ class ProviderConfig(BaseModel):
     api_key_env: str = "OPENAI_API_KEY"
     embedding_model: str = ""
     rerank_model: str = ""
+    memory_model: str = ""
 
 
 class MetadataFieldConfig(BaseModel):

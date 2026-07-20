@@ -7,6 +7,7 @@ from typing import Any
 
 from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.adapters.sqlite_link_summaries import parse_link_summaries
+from anchor.adapters.sqlite_memory_repository import invalidate_memory_facts_for_evidence
 from anchor.adapters.sqlite_repository import SqliteRepositoryBase
 from anchor.adapters.sqlite_support import utc_now_iso
 from anchor.adapters.sqlite_vector_support import (
@@ -127,6 +128,7 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             connection.execute("DELETE FROM file_chunks_fts WHERE document_id = ?", (document_id,))
             connection.execute("DELETE FROM file_chunks WHERE document_id = ?", (document_id,))
             connection.commit()
+        invalidate_memory_facts_for_evidence(self._database_path, [document_id])
         return current
 
     def get(self, document_id: str, *, project: str) -> IndexedFileRecord | None:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.adapters.sqlite_link_summaries import parse_link_summaries
+from anchor.adapters.sqlite_memory_repository import invalidate_memory_facts_for_evidence
 from anchor.adapters.sqlite_repository import SqliteRepositoryBase
 from anchor.adapters.sqlite_support import utc_now_iso
 from anchor.adapters.sqlite_vector_support import (
@@ -26,6 +27,47 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
 
     def __init__(self, database_path: Path | None = None, *, vector_dimension: int | None = None) -> None:
         super().__init__(database_path=database_path, vector_dimension=vector_dimension)
+
+    @staticmethod
+    def _memory_checkpoint_key(project: str, chat_id: str | None) -> str:
+        return f"{project}\x00{chat_id or ''}"
+
+    def get_batch_state(self, *, project: str, chat_id: str | None) -> dict[str, object] | None:
+        key = self._memory_checkpoint_key(project, chat_id)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT pending_count, pending_since, last_extraction_at FROM memory_pipeline_checkpoints WHERE pipeline_key = ?",
+                (key,),
+            ).fetchone()
+        return None if row is None else dict(row)
+
+    def save_batch_state(
+        self,
+        *,
+        project: str,
+        chat_id: str | None,
+        pending_count: int,
+        pending_since: float | None,
+        last_extraction_at: float | None,
+    ) -> None:
+        now = utc_now_iso()
+        key = self._memory_checkpoint_key(project, chat_id)
+        with self._write_connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO memory_pipeline_checkpoints (
+                    pipeline_key, project, chat_id, processed_count, status, updated_at,
+                    pending_count, pending_since, last_extraction_at
+                ) VALUES (?, ?, ?, 0, 'idle', ?, ?, ?, ?)
+                ON CONFLICT(pipeline_key) DO UPDATE SET
+                    pending_count = excluded.pending_count,
+                    pending_since = excluded.pending_since,
+                    last_extraction_at = excluded.last_extraction_at,
+                    updated_at = excluded.updated_at
+                """,
+                (key, project, chat_id, now, pending_count, pending_since, last_extraction_at),
+            )
+            connection.commit()
 
     def append(
         self,
@@ -225,6 +267,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
             )
             self._purge_retrieval_rows(connection, document_id=document_id)
             connection.commit()
+        invalidate_memory_facts_for_evidence(self._database_path, [document_id])
         return current
 
     def list_chunks(self, document_id: str) -> list[DocumentChunkRecord]:

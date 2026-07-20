@@ -182,6 +182,12 @@ class SqliteMaintenanceRepository(SqliteRepositoryBase):
                 JOIN documents AS d ON d.id = c.document_id
                 WHERE d.deleted_at IS NULL
             """.strip(),
+            "memory_facts_fts": """
+                INSERT INTO memory_facts_fts (fact_id, content)
+                SELECT id, content
+                FROM memory_facts
+                WHERE status != 'deleted'
+            """.strip(),
         }
 
     def _rebuild_search_indexes(self, connection: sqlite3.Connection) -> list[str]:

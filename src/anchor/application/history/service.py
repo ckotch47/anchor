@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import OrderedDict
+from collections.abc import Callable
 from time import monotonic
 
 from anchor.adapters.sqlite_history_repository import SqliteHistoryRepository
@@ -19,6 +21,9 @@ from anchor.application.retrieval.document_chunking import DocumentChunkingServi
 from anchor.application.retrieval.rerank_service import RerankService
 from anchor.application.retrieval.search_scoring import combine_search_scores
 from anchor.application.system.metadata_service import MetadataSchemaService
+
+logger = logging.getLogger(__name__)
+MemoryExtractor = Callable[..., object]
 
 
 class HistoryService:
@@ -39,6 +44,94 @@ class HistoryService:
         self._rerank_service = rerank_service
         self._metadata_service = metadata_service
         self._budget_tokens = budget_tokens
+        self._memory_extractor: MemoryExtractor | None = None
+        self._memory_auto_extract = False
+        self._memory_extract_batch_size = 1
+        self._memory_extract_min_interval_seconds = 0.0
+
+    def configure_memory_extraction(
+        self,
+        extractor: MemoryExtractor | None,
+        *,
+        enabled: bool,
+        batch_size: int = 1,
+        min_interval_seconds: float = 0.0,
+    ) -> None:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be greater than zero")
+        if min_interval_seconds < 0:
+            raise ValueError("min_interval_seconds must not be negative")
+        self._memory_extractor = extractor
+        self._memory_auto_extract = enabled
+        self._memory_extract_batch_size = batch_size
+        self._memory_extract_min_interval_seconds = min_interval_seconds
+
+    def _maybe_extract_memory(self, project: str) -> None:
+        if not self._memory_auto_extract or self._memory_extractor is None:
+            return
+        now = monotonic()
+        state = self._repository.get_batch_state(project=project, chat_id=None) or {}
+        pending_count = int(state.get("pending_count") or 0) + 1
+        pending_since = state.get("pending_since")
+        pending_since = float(pending_since) if pending_since is not None else now
+        last_extraction_at = state.get("last_extraction_at")
+        last_extraction_at = float(last_extraction_at) if last_extraction_at is not None else None
+        self._repository.save_batch_state(
+            project=project,
+            chat_id=None,
+            pending_count=pending_count,
+            pending_since=pending_since,
+            last_extraction_at=last_extraction_at,
+        )
+        pending_elapsed = now - pending_since
+        since_last = float("inf") if last_extraction_at is None else now - last_extraction_at
+        batch_ready = pending_count >= self._memory_extract_batch_size
+        interval_ready = pending_elapsed >= self._memory_extract_min_interval_seconds
+        retry_allowed = since_last >= self._memory_extract_min_interval_seconds
+        if (not batch_ready and not interval_ready) or not retry_allowed:
+            return
+        self._run_memory_extraction(project, pending_count, pending_since, now)
+
+    def _run_memory_extraction(
+        self,
+        project: str,
+        pending_count: int,
+        pending_since: float | None,
+        now: float,
+    ) -> object | None:
+        self._repository.save_batch_state(
+            project=project,
+            chat_id=None,
+            pending_count=pending_count,
+            pending_since=pending_since,
+            last_extraction_at=now,
+        )
+        try:
+            result = self._memory_extractor(project=project, limit=pending_count)
+        except Exception:
+            logger.warning("automatic memory extraction failed after history append", exc_info=True)
+            return None
+        self._repository.save_batch_state(
+            project=project,
+            chat_id=None,
+            pending_count=0,
+            pending_since=None,
+            last_extraction_at=now,
+        )
+        return result
+
+    def flush_memory_extraction(self, *, project: str | None = None) -> object | None:
+        if not self._memory_auto_extract or self._memory_extractor is None:
+            return None
+        resolved_project = project or self._project
+        state = self._repository.get_batch_state(project=resolved_project, chat_id=None) or {}
+        pending_count = int(state.get("pending_count") or 0)
+        if pending_count <= 0:
+            return None
+        now = monotonic()
+        pending_since = state.get("pending_since")
+        pending_since = float(pending_since) if pending_since is not None else now
+        return self._run_memory_extraction(resolved_project, pending_count, pending_since, now)
 
     def append(
         self,
@@ -66,6 +159,7 @@ class HistoryService:
         )
         self._queue_embeddings(result.id)
         self._drain_pending_embeddings(resolved_project, limit=1, time_budget_seconds=0.1)
+        self._maybe_extract_memory(resolved_project)
         return result
 
     def update(

@@ -8,6 +8,7 @@ from mcp.types import CallToolResult
 from anchor.application.files.models import FilesGetResult, FilesListResult
 from anchor.application.history.models import HistorySearchResult
 from anchor.application.links.models import DocumentLinkListResult
+from anchor.application.memory.models import MemoryFactStatus, MemoryScope
 from anchor.application.retrieval.search_query import SearchQuery
 from anchor.application.system.projects_service import ProjectsListResult
 from anchor.cli_shared import resolve_project, resolve_view, response_formatter
@@ -818,6 +819,253 @@ def projects_list(profile: str | None = None) -> dict[str, Any]:
             container,
         ),
     )
+
+
+@mcp_app.tool(name="memory_capture", description="Capture an atomic memory fact with scope and evidence")
+def memory_capture(
+    content: str,
+    fact_type: str,
+    scope: MemoryScope = "project",
+    project: str | None = None,
+    chat_id: str | None = None,
+    confidence: float = 1.0,
+    evidence_refs: list[str | dict[str, Any]] | None = None,
+    status: MemoryFactStatus = "candidate",
+    supersedes_id: str | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        result = container.memory_service.capture(
+            content=content,
+            fact_type=fact_type,
+            scope=scope,
+            project=resolve_project(container, project),
+            chat_id=chat_id,
+            confidence=confidence,
+            evidence_refs=evidence_refs or [],
+            status=status,
+            supersedes_id=supersedes_id,
+        )
+    except ValueError as exc:
+        return _failure("memory.capture", "INVALID_ARGS", str(exc), container)
+    except LookupError as exc:
+        return _failure("memory.capture", "NOT_FOUND", str(exc), container)
+    return _tool_result("memory.capture", {"fact": result.model_dump()}, container)
+
+
+@mcp_app.tool(name="memory_search", description="Search memory facts with scope and project filters")
+def memory_search(
+    query: str,
+    scope: str = "all",
+    project: str | None = None,
+    projects: list[str] | None = None,
+    chat_id: str | None = None,
+    fact_type: str | None = None,
+    status: MemoryFactStatus | list[MemoryFactStatus] | None = "active",
+    limit: int = 20,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        result = container.memory_service.search(
+            query=query,
+            scope=scope,
+            project=resolve_project(container, project) if project else None,
+            projects=projects,
+            chat_id=chat_id,
+            fact_type=fact_type,
+            status=status,
+            limit=limit,
+        )
+    except ValueError as exc:
+        return _failure("memory.search", "INVALID_ARGS", str(exc), container)
+    return _tool_result("memory.search", result.model_dump(), container)
+
+
+@mcp_app.tool(name="memory_extract", description="Extract L1 facts and an L2 scenario from recent history")
+def memory_extract(
+    project: str | None = None,
+    chat_id: str | None = None,
+    limit: int = 20,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        result = container.memory_service.extract(
+            project=resolve_project(container, project),
+            chat_id=chat_id,
+            limit=limit,
+        )
+    except ValueError as exc:
+        return _failure("memory.extract", "INVALID_ARGS", str(exc), container)
+    except RuntimeError as exc:
+        return _failure("memory.extract", "PROVIDER_OFFLINE", str(exc), container)
+    except Exception as exc:
+        return _failure("memory.extract", "PROVIDER_ERROR", str(exc), container)
+    return _tool_result("memory.extract", result.model_dump(), container)
+
+
+@mcp_app.tool(name="memory_flush", description="Flush pending automatic memory extraction batch")
+def memory_flush(project: str | None = None, dry_run: bool = False, profile: str | None = None) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        resolved_project = resolve_project(container, project)
+        if dry_run:
+            return _tool_result(
+                "memory.flush",
+                {"dry_run": True, "preview": container.memory_service.preview_extraction(project=resolved_project)},
+                container,
+            )
+        result = container.history_service.flush_memory_extraction(project=resolved_project)
+    except ValueError as exc:
+        return _failure("memory.flush", "INVALID_ARGS", str(exc), container)
+    data: dict[str, Any] = {"flushed": result is not None}
+    if result is not None and hasattr(result, "model_dump"):
+        data["extraction"] = result.model_dump()
+    return _tool_result("memory.flush", data, container)
+
+
+@mcp_app.tool(name="memory_recall", description="Recall active global, project, and chat memory")
+def memory_recall(
+    query: str,
+    project: str | None = None,
+    chat_id: str | None = None,
+    limit: int = 5,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        result = container.memory_service.recall(
+            query=query,
+            project=resolve_project(container, project),
+            chat_id=chat_id,
+            limit=limit,
+        )
+    except ValueError as exc:
+        return _failure("memory.recall", "INVALID_ARGS", str(exc), container)
+    return _tool_result("memory.recall", result.model_dump(), container)
+
+
+@mcp_app.tool(name="memory_context", description="Build agent context from active global, project, and chat memory")
+def memory_context(
+    query: str,
+    project: str | None = None,
+    chat_id: str | None = None,
+    limit: int = 5,
+    budget_tokens: int | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        result = container.memory_service.build_context(
+            query=query,
+            project=resolve_project(container, project),
+            chat_id=chat_id,
+            limit=limit,
+            budget_tokens=budget_tokens,
+        )
+    except ValueError as exc:
+        return _failure("memory.context", "INVALID_ARGS", str(exc), container)
+    return _tool_result("memory.context", result.model_dump(), container)
+
+
+@mcp_app.tool(name="memory_promote", description="Promote a memory fact to chat, project, or global scope")
+def memory_promote(
+    fact_id: str,
+    scope: MemoryScope,
+    project: str | None = None,
+    chat_id: str | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        result = container.memory_service.promote(fact_id, scope=scope, project=project, chat_id=chat_id)
+    except LookupError as exc:
+        return _failure("memory.promote", "NOT_FOUND", str(exc), container)
+    except ValueError as exc:
+        return _failure("memory.promote", "INVALID_ARGS", str(exc), container)
+    return _tool_result("memory.promote", {"fact": result.model_dump()}, container)
+
+
+@mcp_app.tool(name="memory_evidence", description="Drill down from a memory fact to its canonical evidence")
+def memory_evidence(
+    fact_id: str,
+    project: str | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        result = container.memory_service.evidence(fact_id, project=resolve_project(container, project))
+    except LookupError as exc:
+        return _failure("memory.evidence", "NOT_FOUND", str(exc), container)
+    except ValueError as exc:
+        return _failure("memory.evidence", "INVALID_ARGS", str(exc), container)
+    return _tool_result("memory.evidence", result.model_dump(), container)
+
+
+@mcp_app.tool(name="memory_status", description="Change the lifecycle status of a memory fact")
+def memory_status(
+    fact_id: str,
+    status: MemoryFactStatus,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        result = container.memory_service.update_status(fact_id, status)
+    except LookupError as exc:
+        return _failure("memory.status", "NOT_FOUND", str(exc), container)
+    except ValueError as exc:
+        return _failure("memory.status", "INVALID_ARGS", str(exc), container)
+    return _tool_result("memory.status", {"fact": result.model_dump()}, container)
+
+
+@mcp_app.tool(name="memory_scenarios", description="Search active L2 memory scenarios in project and global scope")
+def memory_scenarios(
+    query: str,
+    project: str | None = None,
+    limit: int = 5,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        result = container.memory_service.search_scenarios(
+            query=query,
+            project=resolve_project(container, project),
+            limit=limit,
+        )
+    except ValueError as exc:
+        return _failure("memory.scenarios", "INVALID_ARGS", str(exc), container)
+    return _tool_result("memory.scenarios", result.model_dump(), container)
+
+
+@mcp_app.tool(name="memory_conflicts", description="List active memory groups that need conflict review")
+def memory_conflicts(
+    project: str | None = None,
+    chat_id: str | None = None,
+    limit: int = 20,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        result = container.memory_service.conflicts(
+            project=resolve_project(container, project),
+            chat_id=chat_id,
+            limit=limit,
+        )
+    except ValueError as exc:
+        return _failure("memory.conflicts", "INVALID_ARGS", str(exc), container)
+    return _tool_result("memory.conflicts", result.model_dump(), container)
+
+
+@mcp_app.tool(name="memory_metrics", description="Read memory quality and extraction metrics")
+def memory_metrics(project: str | None = None, profile: str | None = None) -> dict[str, Any]:
+    container = _container(profile)
+    try:
+        result = container.memory_service.metrics(project=resolve_project(container, project))
+    except ValueError as exc:
+        return _failure("memory.metrics", "INVALID_ARGS", str(exc), container)
+    return _tool_result("memory.metrics", result.model_dump(), container)
 
 
 def run_stdio() -> None:
