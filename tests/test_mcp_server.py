@@ -12,7 +12,9 @@ from anchor.mcp_server import (
     files_get,
     files_index,
     files_list,
+    files_reindex,
     files_search,
+    health,
     history_append,
     history_delete,
     history_search,
@@ -66,6 +68,7 @@ class McpServerTest(unittest.TestCase):
         self.assertIn("tasks_add", tool_names)
         self.assertIn("tasks_get", tool_names)
         self.assertIn("files_index", tool_names)
+        self.assertIn("files_reindex", tool_names)
         self.assertIn("files_get", tool_names)
         self.assertIn("files_delete", tool_names)
         self.assertIn("files_list", tool_names)
@@ -73,6 +76,33 @@ class McpServerTest(unittest.TestCase):
         self.assertIn("links_add", tool_names)
         self.assertIn("links_delete", tool_names)
         self.assertIn("links_list", tool_names)
+
+    def test_mcp_health_disables_automatic_migrations(self) -> None:
+        with patch("anchor.mcp_server.build_container") as build_container:
+            container = build_container.return_value
+            container.config.runtime.default_view = "compact"
+            container.health_service.health.return_value.ready = True
+            container.health_service.health.return_value.model_dump.return_value = {
+                "status": "ok",
+                "ready": True,
+            }
+
+            result = health(profile="ci")
+
+        build_container.assert_called_once_with(profile="ci", auto_migrate=False)
+        self.assertFalse(result.isError)
+
+    def test_mcp_search_rejects_unbounded_limit_with_machine_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            database_path = Path(tmpdir) / "anchor.sqlite3"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=database_path):
+                    result = tasks_search(query="deploy", limit=101, project="repo-a")
+
+        payload = _structured(result)
+        self.assertTrue(result.isError)
+        self.assertEqual(payload["error"]["code"], "INVALID_ARGS")
 
     def test_mcp_view_full_returns_full_records(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -84,12 +114,13 @@ class McpServerTest(unittest.TestCase):
             db_path = Path(tmpdir) / "anchor.sqlite3"
             with patch("anchor.config.default_config_path", return_value=config_path):
                 with patch("anchor.container.default_database_path", return_value=db_path):
-                    note_payload = _structured(notes_add(title="Note", body="Body text", source="cli"))
+                    note_payload = _structured(notes_add(title="Note", body="Body text", source="cli", project="repo-a"))
                     task_payload = _structured(tasks_add(title="Task", body="Task body", project="repo-a"))
                     history_payload = _structured(
                         history_append(entry_type="deploy", payload="Deploy completed", project="repo-a")
                     )
                     files_index(roots=[str(root)], project="repo-a")
+                    files_reindex(roots=[str(root)], project="repo-a")
                     file_bootstrap_payload = files_get(path=str((root / "app.py").resolve()), project="repo-a", view="full")
 
                     note_id = note_payload["data"]["note"]["id"]
@@ -97,17 +128,17 @@ class McpServerTest(unittest.TestCase):
                     history_id = history_payload["data"]["history"]["id"]
                     file_id = _structured(file_bootstrap_payload)["data"]["file"]["id"]
 
-                    links_add(source_id=note_id, target_id=task_id, relation_type="references")
-                    links_add(source_id=task_id, target_id=history_id, relation_type="references")
-                    links_add(source_id=file_id, target_id=note_id, relation_type="related")
+                    links_add(project="repo-a", source_id=note_id, target_id=task_id, relation_type="references")
+                    links_add(project="repo-a", source_id=task_id, target_id=history_id, relation_type="references")
+                    links_add(project="repo-a", source_id=file_id, target_id=note_id, relation_type="related")
 
-                    notes_list_payload = notes_list(view="full")
+                    notes_list_payload = notes_list(project="repo-a", view="full")
                     task_get_payload = tasks_get(
                         task_id=task_id,
                         project="repo-a",
                         view="full",
                     )
-                    notes_search_payload = notes_search(query="Body", view="full")
+                    notes_search_payload = notes_search(query="Body", project="repo-a", view="full")
                     tasks_list_payload = tasks_list(project="repo-a", view="full")
                     tasks_search_payload = tasks_search(query="Task", project="repo-a", view="full")
                     history_search_payload = history_search(query="Deploy", project="repo-a", view="full")
@@ -388,9 +419,9 @@ class McpServerTest(unittest.TestCase):
                     target = _structured(notes_add(title="Target", body="Body text", source="cli", project="repo-a"))
                     source_id = source["data"]["note"]["id"]
                     target_id = target["data"]["note"]["id"]
-                    add_payload = links_add(source_id=source_id, target_id=target_id, relation_type="references")
-                    list_payload = links_list(source_id=source_id)
-                    delete_payload = links_delete(source_id=source_id, target_id=target_id, relation_type="references")
+                    add_payload = links_add(project="repo-a", source_id=source_id, target_id=target_id, relation_type="references")
+                    list_payload = links_list(project="repo-a", source_id=source_id)
+                    delete_payload = links_delete(project="repo-a", source_id=source_id, target_id=target_id, relation_type="references")
 
         self.assertEqual(add_payload.content, [])
         self.assertEqual(list_payload.content, [])
@@ -402,6 +433,23 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(_structured(list_payload)["data"]["count"], 1)
         self.assertEqual(_structured(delete_payload)["command"], "links.delete")
         self.assertTrue(_structured(delete_payload)["data"]["deleted"])
+
+    def test_mcp_scoped_mutation_missing_project_uses_machine_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            db_path = Path(tmpdir) / "anchor.sqlite3"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=db_path):
+                    payload = links_add(
+                        source_id="source",
+                        target_id="target",
+                        relation_type="references",
+                    )
+
+        structured = _structured(payload)
+        self.assertFalse(structured["ok"])
+        self.assertEqual(structured["command"], "links.add")
+        self.assertEqual(structured["error"]["code"], "INVALID_ARGS")
 
     def test_mcp_files_list_exposes_next_cursor(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

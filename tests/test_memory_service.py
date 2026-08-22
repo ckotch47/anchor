@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from anchor.adapters.sqlite_memory_repository import SqliteMemoryRepository
@@ -187,7 +188,7 @@ class MemoryServiceTest(unittest.TestCase):
         self.assertIn("<anchor_memory>", result.context)
 
     def test_evidence_resolves_live_history_and_hides_deleted_source(self) -> None:
-        with sqlite3.connect(self.service._repository._database_path) as connection:
+        with closing(sqlite3.connect(self.service._repository._database_path)) as connection:
             connection.execute(
                 "INSERT INTO documents (id, project, document_type, title, body, source, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("history-1", "repo-a", "history", "decision", "Use SQLite", "test", "", "now", "now"),
@@ -208,7 +209,7 @@ class MemoryServiceTest(unittest.TestCase):
 
         self.assertEqual(live.count, 1)
         self.assertEqual(live.evidence[0].record["payload"] if live.evidence[0].record else None, "Use SQLite")
-        with sqlite3.connect(self.service._repository._database_path) as connection:
+        with closing(sqlite3.connect(self.service._repository._database_path)) as connection:
             connection.execute("UPDATE documents SET deleted_at = 'now' WHERE id = ?", ("history-1",))
             connection.commit()
 

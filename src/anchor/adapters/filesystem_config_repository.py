@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import os
+import stat
 import tempfile
 import tomllib
 from importlib import resources
@@ -13,6 +14,8 @@ from anchor.config import AppConfig
 
 
 class FileSystemConfigRepository:
+    _MAX_CONFIG_BYTES = 1_000_000
+
     def __init__(self, config_path: Path | None = None) -> None:
         self._config_path = config_path or config_module.default_config_path()
 
@@ -27,16 +30,63 @@ class FileSystemConfigRepository:
         return config, config_path, profile
 
     def load_raw(self) -> tuple[AppConfig, Path]:
-        if not self._config_path.exists():
+        try:
+            parent_metadata = os.lstat(self._config_path.parent)
+        except FileNotFoundError:
             return AppConfig.default(), self._config_path
-
-        raw = self._config_path.read_bytes()
+        if (
+            not stat.S_ISDIR(parent_metadata.st_mode)
+            or self._config_path.parent.is_symlink()
+            or parent_metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(parent_metadata.st_mode) & 0o077
+        ):
+            raise ValueError("config parent must be a trusted private directory")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        try:
+            descriptor = os.open(self._config_path, flags)
+        except FileNotFoundError:
+            return AppConfig.default(), self._config_path
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or metadata.st_nlink != 1
+                or stat.S_IMODE(metadata.st_mode) & 0o077
+            ):
+                raise ValueError("config must be a trusted private regular file")
+            chunks: list[bytes] = []
+            remaining = self._MAX_CONFIG_BYTES + 1
+            while remaining > 0:
+                chunk = os.read(descriptor, min(65_536, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            raw = b"".join(chunks)
+            if len(raw) > self._MAX_CONFIG_BYTES:
+                raise ValueError("config exceeds maximum supported size")
+            current = os.lstat(self._config_path)
+            if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino):
+                raise ValueError("config identity changed during read")
+        finally:
+            os.close(descriptor)
         data = tomllib.loads(raw.decode("utf-8")) if raw else {}
         config = AppConfig.model_validate(data or {})
         return config, self._config_path
 
     def save(self, config: AppConfig) -> Path:
-        self._config_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._config_path == config_module.default_config_path():
+            config_module.ensure_private_default_data_dir()
+        self._config_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        parent_metadata = os.lstat(self._config_path.parent)
+        if (
+            not stat.S_ISDIR(parent_metadata.st_mode)
+            or self._config_path.parent.is_symlink()
+            or parent_metadata.st_uid != os.geteuid()
+        ):
+            raise ValueError("config parent must be an owned real directory")
+        self._config_path.parent.chmod(0o700)
         payload = self._serialize(config)
         temp_path: Path | None = None
         with tempfile.NamedTemporaryFile(
@@ -54,6 +104,7 @@ class FileSystemConfigRepository:
         try:
             assert temp_path is not None
             temp_path.replace(self._config_path)
+            self._config_path.chmod(0o600)
         except Exception:
             if temp_path is not None and temp_path.exists():
                 temp_path.unlink(missing_ok=True)

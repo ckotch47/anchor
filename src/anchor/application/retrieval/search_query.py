@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 _TOKEN_PATTERN = re.compile(r"[^\W_]+(?:[-'][^\W_]+)*", re.UNICODE)
 _ALLOWED_SEARCH_TYPES = {"notes", "tasks", "history", "files"}
+MAX_RETRIEVAL_LIMIT = 100
 
 
 class SearchQuery(BaseModel):
@@ -13,8 +14,8 @@ class SearchQuery(BaseModel):
     types: list[str] = Field(default_factory=lambda: ["notes", "tasks", "history", "files"])
     project: str
     projects: list[str] | None = None
-    limit: int = 20
-    budget_tokens: int = 800
+    limit: int = Field(default=20, gt=0, le=MAX_RETRIEVAL_LIMIT)
+    budget_tokens: int = Field(default=800, gt=0, le=10_000)
     weights: dict[str, float] = Field(default_factory=dict)
     explain: bool = False
     cursor: str | None = None
@@ -29,10 +30,6 @@ class SearchQuery(BaseModel):
             raise ValueError("project must not be empty")
         if self.projects is not None:
             self.projects = _normalize_projects(self.projects)
-        if self.limit <= 0:
-            raise ValueError("limit must be greater than zero")
-        if self.budget_tokens <= 0:
-            raise ValueError("budget_tokens must be greater than zero")
         if self.cursor is not None and not self.cursor.strip():
             self.cursor = None
         self.types = _normalize_search_types(self.types)
@@ -47,6 +44,14 @@ class SearchQuery(BaseModel):
                 normalized_weights[normalized_type] = float(raw_weight)
             self.weights = normalized_weights
         return self
+
+
+def validate_retrieval_limit(limit: int) -> int:
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("limit must be an integer")
+    if not 0 < limit <= MAX_RETRIEVAL_LIMIT:
+        raise ValueError(f"limit must be between 1 and {MAX_RETRIEVAL_LIMIT}")
+    return limit
 
 
 def normalize_fts5_query(raw_query: str) -> str:

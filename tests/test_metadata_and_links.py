@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from anchor.adapters.sqlite_links_repository import SqliteLinksRepository
@@ -38,7 +39,7 @@ class MetadataAndLinksTest(unittest.TestCase):
             db_path = Path(tmpdir) / "anchor.sqlite3"
             SqliteMigrationRepository(database_path=db_path).apply_pending()
             now = "2026-06-13T00:00:00+00:00"
-            with sqlite3.connect(db_path) as connection:
+            with closing(sqlite3.connect(db_path)) as connection:
                 connection.execute(
                     """
                     INSERT INTO documents (
@@ -89,10 +90,10 @@ class MetadataAndLinksTest(unittest.TestCase):
                 config=LinksConfig(relation_types=["references", "blocks"]),
             )
 
-            created = service.create("01abc000-0000-7000-8000-000000000000", "01abc000-0000-7000-8000-000000000001", "references")
-            listed = service.list_by_source(created.source_id)
+            created = service.create("workspace", "01abc000-0000-7000-8000-000000000000", "01abc000-0000-7000-8000-000000000001", "references")
+            listed = service.list_by_source(created.source_id, project="workspace")
 
             self.assertEqual(created.relation_type, "references")
             self.assertEqual(listed.count, 1)
             self.assertEqual(listed.links[0].target_id, created.target_id)
-            self.assertTrue(service.delete(created.source_id, created.target_id, created.relation_type))
+            self.assertTrue(service.delete("workspace", created.source_id, created.target_id, created.relation_type))

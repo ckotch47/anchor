@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import webbrowser
 from typing import Any
 
@@ -175,7 +176,8 @@ async function mcpCallTool(name, args) {
 }
 
 function withProject(args) {
-  if (currentProject) args.project = currentProject;
+  if (!currentProject) throw new Error('Select a project before using project-scoped tools');
+  args.project = currentProject;
   return args;
 }
 
@@ -184,9 +186,11 @@ async function loadProjects() {
     const data = await mcpCallTool('projects_list');
     const projects = data?.data?.projects || [];
     const sel = document.getElementById('projectFilter');
-    sel.innerHTML = '<option value="">-- all projects --</option>' + projects.map(p =>
+    sel.innerHTML = projects.map(p =>
       `<option value="${esc(p)}">${esc(p)}</option>`
     ).join('');
+    if (!currentProject && projects.length) currentProject = projects[0];
+    sel.value = currentProject;
   } catch(_) {}
 }
 
@@ -254,11 +258,11 @@ pages.dashboard = async function() {
     el.innerHTML = `
       <div class="row">
         <div class="card"><h3>Status</h3><div style="font-size:24px;font-weight:700;color:${data.ok?'var(--green)':'var(--red)'}">${data.ok?'OK':'ERROR'}</div></div>
-        <div class="card"><h3>Database</h3><div style="font-size:13px;word-break:break-all">${data.data?.database_path||'N/A'}</div></div>
-        <div class="card"><h3>Project</h3><div style="font-size:13px">${currentProject||'(all)'}</div></div>
+        <div class="card"><h3>Database</h3><div style="font-size:13px;word-break:break-all">${esc(data.data?.database_path||'N/A')}</div></div>
+      <div class="card"><h3>Project</h3><div style="font-size:13px">${esc(currentProject||'(none selected)')}</div></div>
       </div>
-      <div class="card"><h3>Response</h3><pre>${JSON.stringify(data.data||data, null, 2)}</pre></div>`;
-  } catch(e) { el.innerHTML = `<div class="card"><h3>Error</h3><pre style="color:var(--red)">${e.message}</pre></div>`; }
+      <div class="card"><h3>Response</h3><pre>${esc(JSON.stringify(data.data||data, null, 2))}</pre></div>`;
+  } catch(e) { el.innerHTML = `<div class="card"><h3>Error</h3><pre style="color:var(--red)">${esc(e.message)}</pre></div>`; }
 };
 
 // ---- Notes ----
@@ -287,7 +291,7 @@ async function renderNotes(query) {
         <td><button class="btn-sm" onclick="viewNote('${n.id}')">View</button> <button class="btn-sm btn-secondary" onclick="showNoteForm('${n.id}')">Edit</button> <button class="btn-sm btn-danger" onclick="deleteNote('${n.id}')">Del</button></td>
       </tr>`).join('')}
       </tbody></table>`;
-  } catch(e) { el.innerHTML = `<div class="card"><pre style="color:var(--red)">${e.message}</pre></div>`; }
+  } catch(e) { el.innerHTML = `<div class="card"><pre style="color:var(--red)">${esc(e.message)}</pre></div>`; }
 }
 
 window.showNoteForm = async function(id) {
@@ -357,8 +361,8 @@ window.viewNote = async function(id) {
 
     // Linked entities
     const [outRes, inRes] = await Promise.all([
-      mcpCallTool('links_list', { source_id:id }).catch(()=>({data:{links:[]}})),
-      mcpCallTool('links_list', { target_id:id }).catch(()=>({data:{links:[]}})),
+      mcpCallTool('links_list', withProject({ source_id:id })).catch(()=>({data:{links:[]}})),
+      mcpCallTool('links_list', withProject({ target_id:id })).catch(()=>({data:{links:[]}})),
     ]);
     const allLinks = [...(outRes?.data?.links||[]), ...(inRes?.data?.links||[])];
     const seen = new Set();
@@ -368,8 +372,8 @@ window.viewNote = async function(id) {
       if (seen.has(linkedId)) continue;
       seen.add(linkedId);
       const results = await Promise.allSettled([
-        mcpCallTool('notes_get', { note_id:linkedId }).then(r=>({type:'note', title:r.data.note.title})),
-        mcpCallTool('tasks_get', { task_id:linkedId }).then(r=>({type:'task', title:r.data.task.title})),
+        mcpCallTool('notes_get', withProject({ note_id:linkedId })).then(r=>({type:'note', title:r.data.note.title})),
+        mcpCallTool('tasks_get', withProject({ task_id:linkedId })).then(r=>({type:'task', title:r.data.task.title})),
       ]);
       for (const r of results) {
         if (r.status==='fulfilled') { entities.push(r.value); break; }
@@ -416,7 +420,7 @@ async function renderTasks(query) {
         <td><button class="btn-sm" onclick="viewTask('${t.id}')">View</button> <button class="btn-sm btn-secondary" onclick="showTaskForm('${t.id}')">Edit</button> <button class="btn-sm btn-danger" onclick="deleteTask('${t.id}')">Del</button></td>
       </tr>`).join('')}
       </tbody></table>`;
-  } catch(e) { el.innerHTML = `<div class="card"><pre style="color:var(--red)">${e.message}</pre></div>`; }
+  } catch(e) { el.innerHTML = `<div class="card"><pre style="color:var(--red)">${esc(e.message)}</pre></div>`; }
 }
 
 window.viewTask = async function(id) {
@@ -429,9 +433,9 @@ window.viewTask = async function(id) {
     const task = data.data.task;
 
     const [outRes, inRes, allTasksData] = await Promise.all([
-      mcpCallTool('links_list', { source_id:id }).catch(()=>({data:{links:[]}})),
-      mcpCallTool('links_list', { target_id:id }).catch(()=>({data:{links:[]}})),
-      mcpCallTool('tasks_list', withProject({ limit:200, view:'full' })).catch(()=>({data:{tasks:[]}})),
+      mcpCallTool('links_list', withProject({ source_id:id })).catch(()=>({data:{links:[]}})),
+      mcpCallTool('links_list', withProject({ target_id:id })).catch(()=>({data:{links:[]}})),
+      mcpCallTool('tasks_list', withProject({ limit:100, view:'full' })).catch(()=>({data:{tasks:[]}})),
     ]);
 
     const allLinks = [...(outRes?.data?.links||[]), ...(inRes?.data?.links||[])];
@@ -443,8 +447,8 @@ window.viewTask = async function(id) {
       if (seen.has(linkedId)) continue;
       seen.add(linkedId);
       const results = await Promise.allSettled([
-        mcpCallTool('notes_get', { note_id:linkedId }).then(r=>({type:'note', title:r.data.note.title})),
-        mcpCallTool('tasks_get', { task_id:linkedId }).then(r=>({type:'task', title:r.data.task.title})),
+        mcpCallTool('notes_get', withProject({ note_id:linkedId })).then(r=>({type:'note', title:r.data.note.title})),
+        mcpCallTool('tasks_get', withProject({ task_id:linkedId })).then(r=>({type:'task', title:r.data.task.title})),
       ]);
       for (const r of results) {
         if (r.status==='fulfilled') { entities.push(r.value); break; }
@@ -460,8 +464,8 @@ window.viewTask = async function(id) {
     let relatedNotes = [], relatedHistory = [];
     if (task.correlation_id) {
       const [notesRes, histRes] = await Promise.all([
-        mcpCallTool('notes_search', { query: task.correlation_id, limit:20 }).catch(()=>({data:{results:[]}})),
-        mcpCallTool('history_search', { query: task.correlation_id, limit:20 }).catch(()=>({data:{results:[]}})),
+        mcpCallTool('notes_search', withProject({ query: task.correlation_id, limit:20 })).catch(()=>({data:{results:[]}})),
+        mcpCallTool('history_search', withProject({ query: task.correlation_id, limit:20 })).catch(()=>({data:{results:[]}})),
       ]);
       relatedNotes = (notesRes?.data?.results||[]).filter(r => r.note?.correlation_id === task.correlation_id).map(r => r.note);
       relatedHistory = (histRes?.data?.results||[]).filter(r => r.history?.correlation_id === task.correlation_id).map(r => r.history);
@@ -640,7 +644,7 @@ window.searchHistory = async function() {
         '</tr>';
       }).join('') +
       '</tbody></table>';
-  } catch(e) { el.innerHTML = '<div class="card"><pre style="color:var(--red)">'+e.message+'</pre></div>'; }
+  } catch(e) { el.innerHTML = '<div class="card"><pre style="color:var(--red)">'+esc(e.message)+'</pre></div>'; }
 };
 
 // ---- Files ----
@@ -669,7 +673,7 @@ async function renderFiles(query) {
         <td><button class="btn-sm btn-secondary" onclick="viewFile('${f.id}')">View</button> <button class="btn-sm btn-danger" onclick="deleteFile('${f.id}')">Del</button></td>
       </tr>`).join('')}
       </tbody></table>`;
-  } catch(e) { el.innerHTML = '<div class="card"><pre style="color:var(--red)">'+e.message+'</pre></div>'; }
+  } catch(e) { el.innerHTML = '<div class="card"><pre style="color:var(--red)">'+esc(e.message)+'</pre></div>'; }
 }
 
 window.viewFile = async function(id) {
@@ -709,7 +713,7 @@ pages.projects = async function() {
     el.innerHTML = '<table><colgroup><col></colgroup><thead><tr><th>Project</th></tr></thead><tbody>' +
       projects.map(p => '<tr><td><strong>'+esc(p)+'</strong></td></tr>').join('') +
       '</tbody></table>';
-  } catch(e) { el.innerHTML = '<div class="card"><pre style="color:var(--red)">'+e.message+'</pre></div>'; }
+  } catch(e) { el.innerHTML = '<div class="card"><pre style="color:var(--red)">'+esc(e.message)+'</pre></div>'; }
 };
 
 // ---- Search ----
@@ -751,7 +755,7 @@ window.doSearch = async function() {
         return `<tr><td><span class="badge badge-blue">${type}</span></td><td>${esc(item.title||item.name||item.path||item.id||'')}</td><td>${r.score!=null?r.score.toFixed(3):'-'}</td></tr>`;
       }).join('')}
       </tbody></table>`;
-  } catch(e) { el.innerHTML = `<div class="card"><pre style="color:var(--red)">${e.message}</pre></div>`; }
+  } catch(e) { el.innerHTML = `<div class="card"><pre style="color:var(--red)">${esc(e.message)}</pre></div>`; }
 };
 
 // ---- Tools ----
@@ -765,7 +769,7 @@ pages.tools = async function() {
         <h4>${esc(t.name)}</h4>
         <p>${esc(t.description||'')}</p>
       </div>`).join('')}</div>`;
-  } catch(e) { el.innerHTML = `<div class="card"><pre style="color:var(--red)">${e.message}</pre></div>`; }
+  } catch(e) { el.innerHTML = `<div class="card"><pre style="color:var(--red)">${esc(e.message)}</pre></div>`; }
 };
 
 window.showToolDetail = async function(name) {
@@ -775,7 +779,7 @@ window.showToolDetail = async function(name) {
   document.getElementById('modalBody').innerHTML = `
     <h3>${esc(tool.name)}</h3>
     <p style="color:var(--text-dim);margin-bottom:12px">${esc(tool.description||'')}</p>
-    <div class="form-group"><label>Schema</label><pre>${JSON.stringify(tool.inputSchema, null, 2)}</pre></div>
+    <div class="form-group"><label>Schema</label><pre>${esc(JSON.stringify(tool.inputSchema, null, 2))}</pre></div>
     <div class="btn-row"><button class="btn-secondary" onclick="closeModal()">Close</button></div>`;
   document.getElementById('modalOverlay').classList.add('open');
 };
@@ -786,8 +790,8 @@ pages.config = async function() {
   el.innerHTML = '<div class="loading">Loading...</div>';
   try {
     const data = await mcpCallTool('config_get');
-    el.innerHTML = `<div class="card"><h3>Config</h3><pre>${JSON.stringify(data.data||data, null, 2)}</pre></div>`;
-  } catch(e) { el.innerHTML = `<div class="card"><pre style="color:var(--red)">${e.message}</pre></div>`; }
+    el.innerHTML = `<div class="card"><h3>Config</h3><pre>${esc(JSON.stringify(data.data||data, null, 2))}</pre></div>`;
+  } catch(e) { el.innerHTML = `<div class="card"><pre style="color:var(--red)">${esc(e.message)}</pre></div>`; }
 };
 
 function esc(s) { if (!s&&s!==0) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -801,7 +805,7 @@ document.getElementById('modalOverlay').addEventListener('click', e => { if (e.t
   } catch(e) {
     document.getElementById('statusDot').className = 'status-dot err';
     document.getElementById('statusText').textContent = 'Error: '+e.message;
-    document.getElementById('page-dashboard').innerHTML = `<div class="card"><h3>Connection Error</h3><pre style="color:var(--red)">${e.message}</pre></div>`;
+    document.getElementById('page-dashboard').innerHTML = `<div class="card"><h3>Connection Error</h3><pre style="color:var(--red)">${esc(e.message)}</pre></div>`;
   }
 })();
 </script>
@@ -815,6 +819,7 @@ def serve(
     profile: str | None = None,
     open_browser: bool = True,
 ) -> None:
+    validate_serve_host(host)
     try:
         build_container(profile=profile)
     except Exception as exc:
@@ -840,4 +845,12 @@ def serve(
     mcp_app.run("sse")
 
 
-
+def validate_serve_host(host: str) -> None:
+    if host == "localhost":
+        return
+    try:
+        if ipaddress.ip_address(host).is_loopback:
+            return
+    except ValueError:
+        pass
+    raise ValueError("Anchor serve supports loopback hosts only")

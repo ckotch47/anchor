@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import unittest
+from contextlib import closing
 from unittest.mock import patch
 
 from anchor.adapters.sqlite_vector_support import (
@@ -14,7 +15,7 @@ from anchor.adapters.sqlite_vector_support import (
 
 class SqliteVectorSupportTest(unittest.TestCase):
     def test_loads_extension_and_initializes_chunk_embeddings(self) -> None:
-        with sqlite3.connect(":memory:") as connection:
+        with closing(sqlite3.connect(":memory:")) as connection:
             if sqlite_vector_extension_path() is None:
                 self.skipTest("sqlite vector extension unavailable in test environment")
             connection.execute(
@@ -34,7 +35,7 @@ class SqliteVectorSupportTest(unittest.TestCase):
         self.assertTrue(version)
 
     def test_rejects_python_fallback_for_large_embedding_sets(self) -> None:
-        with sqlite3.connect(":memory:") as connection:
+        with closing(sqlite3.connect(":memory:")) as connection:
             connection.execute(
                 """
                 CREATE TABLE chunk_embeddings (

@@ -16,6 +16,8 @@ from anchor.application.memory.models import (
     MemoryScenarioSearchHit,
     MemoryScenarioSearchResult,
     MemoryScope,
+    MemoryScopeFilter,
+    MemorySearchHit,
     MemorySearchRequest,
     MemorySearchResult,
 )
@@ -33,21 +35,29 @@ class MemoryService:
         self._budget_tokens = budget_tokens
         self._extraction_provider: MemoryExtractionProviderPort | None = None
         self._extraction_model = ""
-        self._external_send_allowed = True
-        self._external_projects: set[str] | None = None
+        self._provider_name = "configured_memory_provider"
+        self._external_send_allowed = False
+        self._external_projects: set[str] = set()
+        self._max_extracted_facts = 20
 
     def configure_extraction(
         self,
         provider: MemoryExtractionProviderPort | None,
         model: str = "",
         *,
-        external_send_allowed: bool = True,
+        external_send_allowed: bool = False,
         external_projects: list[str] | None = None,
+        provider_name: str = "configured_memory_provider",
+        max_extracted_facts: int = 20,
     ) -> None:
+        if max_extracted_facts <= 0:
+            raise ValueError("max_extracted_facts must be greater than zero")
         self._extraction_provider = provider
         self._extraction_model = model
+        self._provider_name = provider_name
         self._external_send_allowed = external_send_allowed
-        self._external_projects = None if external_projects is None else set(external_projects)
+        self._external_projects = set(external_projects or [])
+        self._max_extracted_facts = max_extracted_facts
 
     def preview_extraction(self, *, project: str | None = None, limit: int = 20) -> dict[str, object]:
         if limit <= 0:
@@ -63,8 +73,6 @@ class MemoryService:
             limit=limit,
         )
         allowed = self._external_send_allowed and (
-            self._external_projects is None
-            or
             "*" in self._external_projects
             or resolved_project in self._external_projects
         )
@@ -206,34 +214,57 @@ class MemoryService:
         scope: MemoryScope,
         project: str | None = None,
         chat_id: str | None = None,
+        source_project: str | None = None,
     ) -> MemoryFact:
-        fact = self.get(fact_id)
+        resolved_source_project = source_project or self._project
+        fact = self._repository.get(fact_id)
+        if fact is None or fact.project != resolved_source_project:
+            raise LookupError(f"memory fact not found in project {resolved_source_project}: {fact_id}")
         if fact.status in {"deleted", "superseded"}:
             raise ValueError(f"terminal memory fact cannot be promoted: {fact_id}")
         if not fact.evidence_refs:
             raise ValueError("memory fact promotion requires evidence_refs")
-        resolved_project = project if project is not None else fact.project
-        resolved_chat = chat_id if chat_id is not None else fact.source_chat_id
+        # Global controls retrieval visibility; project remains the immutable
+        # provenance/authorization boundary for later lifecycle mutations.
+        if project is not None and project != resolved_source_project:
+            raise ValueError("memory promotion cannot change source project")
+        resolved_project = resolved_source_project
+        if scope == "global" and (project is not None or chat_id is not None):
+            raise ValueError("global promotion does not accept project or chat_id targets")
+        resolved_chat = (
+            (chat_id if chat_id is not None else fact.source_chat_id)
+            if scope == "chat"
+            else None
+        )
         promoted = self._repository.update_scope(
             fact_id,
             scope=scope,
             project=resolved_project,
             source_chat_id=resolved_chat,
+            source_project=resolved_source_project,
+            expected_status=fact.status,
         )
         if promoted is None:
             raise LookupError(f"memory fact not found: {fact_id}")
-        active = self._repository.update_status(fact_id, "active")
-        if active is None:
-            raise LookupError(f"memory fact not found: {fact_id}")
-        return active
+        return promoted
 
-    def update_status(self, fact_id: str, status: MemoryFactStatus) -> MemoryFact:
-        current = self.get(fact_id)
+    def update_status(
+        self, fact_id: str, status: MemoryFactStatus, *, project: str | None = None
+    ) -> MemoryFact:
+        resolved_project = project or self._project
+        current = self._repository.get(fact_id)
+        if current is None or current.project != resolved_project:
+            raise LookupError(f"memory fact not found in project {resolved_project}: {fact_id}")
         if current.status in {"deleted", "superseded"}:
             raise ValueError(f"terminal memory fact cannot change status: {fact_id}")
         if status == "active" and not current.evidence_refs:
             raise ValueError("active memory facts require evidence_refs")
-        updated = self._repository.update_status(fact_id, status)
+        updated = self._repository.update_status(
+            fact_id,
+            status,
+            source_project=resolved_project,
+            expected_status=current.status,
+        )
         if updated is None:
             raise LookupError(f"memory fact not found: {fact_id}")
         return updated
@@ -242,7 +273,7 @@ class MemoryService:
         self,
         *,
         query: str,
-        scope: str = "all",
+        scope: MemoryScopeFilter = "all",
         project: str | None = None,
         projects: list[str] | None = None,
         chat_id: str | None = None,
@@ -263,7 +294,7 @@ class MemoryService:
         resolved_projects = request.projects or ([request.project] if request.project else None)
         if request.scope == "all" and not resolved_projects and request.chat_id is None:
             resolved_projects = [self._project]
-        statuses = (
+        statuses: list[MemoryFactStatus] = (
             [request.status]
             if isinstance(request.status, str)
             else request.status
@@ -283,7 +314,7 @@ class MemoryService:
             query=request.query,
             count=len(hits),
             results=[
-                {"fact": fact, "score": score, "snippet": snippet}
+                MemorySearchHit(fact=fact, score=score, snippet=snippet)
                 for fact, score, snippet in hits
             ],
         )
@@ -325,11 +356,11 @@ class MemoryService:
             f"Project: {resolved_project}",
             *( [f"Chat: {chat_id}"] if chat_id else [] ),
         ]
-        selected = []
+        selected: list[MemorySearchHit] = []
         selected_scenarios: list[MemoryScenario] = []
         current_tokens = count_tokens("\n".join([*lines, "</anchor_memory>"]))
-        for hit in scenario_result.results:
-            scenario = hit.scenario
+        for scenario_hit in scenario_result.results:
+            scenario = scenario_hit.scenario
             line = f"- [scenario/{scenario.scope}] {scenario.title}: {scenario.summary}"
             line_tokens = count_tokens(line)
             if current_tokens + line_tokens > resolved_budget:
@@ -337,8 +368,8 @@ class MemoryService:
             lines.append(line)
             selected_scenarios.append(scenario)
             current_tokens += line_tokens
-        for hit in recalled.results:
-            fact = hit.fact
+        for fact_hit in recalled.results:
+            fact = fact_hit.fact
             scope = fact.scope if fact.scope != "project" else f"project:{fact.project}"
             line = f"- [{scope}/{fact.fact_type}] {fact.content}"
             line_tokens = count_tokens(line)
@@ -351,7 +382,7 @@ class MemoryService:
                     break
                 line_tokens = count_tokens(line)
             lines.append(line)
-            selected.append(hit)
+            selected.append(fact_hit)
             current_tokens += line_tokens
         lines.append("</anchor_memory>")
         return MemoryContextResult(
@@ -402,12 +433,8 @@ class MemoryService:
         if not isinstance(after_updated_at, str):
             after_updated_at = None
         if not self._external_send_allowed or (
-            self._external_projects is not None
-            and (
-                not self._external_projects
-            and "*" not in self._external_projects
+            "*" not in self._external_projects
             and resolved_project not in self._external_projects
-            )
         ):
             error = "external memory extraction is not allowed for this project"
             self._repository.save_checkpoint(
@@ -458,21 +485,44 @@ class MemoryService:
                     checkpoint_status="completed",
                 )
             evidence_refs = [entry["id"] for entry in entries]
+            redacted_entries: list[tuple[dict[str, str], str]] = []
+            redacted_item_count = 0
+            for entry in entries:
+                redacted_payload = redact_sensitive_text(entry["payload"])
+                if redacted_payload != entry["payload"]:
+                    redacted_item_count += 1
+                redacted_entries.append((entry, redacted_payload))
+            audit_context = {
+                "provider": self._provider_name,
+                "model": self._extraction_model,
+                "project": resolved_project,
+                "scope": "chat" if chat_id else "project",
+                "chat_id": chat_id,
+                "batch_size": len(entries),
+                "redacted_item_count": redacted_item_count,
+            }
             transcript = "\n\n".join(
-                f"[{entry['id']}] {entry['entry_type']}: {entry['payload']}" for entry in entries
+                f"[{entry['id']}] {entry['entry_type']}: {payload}"
+                for entry, payload in redacted_entries
             )
             raw_facts = self._extraction_provider.extract_facts(transcript, evidence_refs, self._extraction_model)
-            created_facts: list[MemoryFact] = []
+            if len(raw_facts) > self._max_extracted_facts:
+                raise ValueError("memory provider returned too many facts")
+            candidate_facts: list[MemoryFact] = []
+            seen_fact_ids: set[str] = set()
             for raw_fact in raw_facts:
                 content = raw_fact.get("content")
                 fact_type = raw_fact.get("fact_type", "fact")
                 if not isinstance(content, str) or not content.strip() or not isinstance(fact_type, str):
                     continue
                 raw_scope = raw_fact.get("scope", "project")
-                scope: MemoryScope = raw_scope if raw_scope in {"project", "global"} else "project"
+                if raw_scope not in {"project", "global"}:
+                    continue
+                scope: MemoryScope = raw_scope
                 confidence = raw_fact.get("confidence", 0.5)
                 if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
-                    confidence = 0.5
+                    continue
+                normalized_evidence_refs: list[str | dict[str, object]] = list(evidence_refs)
                 fact = self.capture(
                     content=content,
                     fact_type=fact_type,
@@ -480,24 +530,42 @@ class MemoryService:
                     project=resolved_project,
                     chat_id=chat_id,
                     confidence=max(0.0, min(1.0, float(confidence))),
-                    evidence_refs=evidence_refs,
-                    status="active",
+                    evidence_refs=normalized_evidence_refs,
+                    status="candidate",
                 )
-                if fact.id not in {item.id for item in created_facts}:
-                    created_facts.append(fact)
+                if fact.id not in seen_fact_ids:
+                    candidate_facts.append(fact)
+                    seen_fact_ids.add(fact.id)
             scenario = None
-            if created_facts:
+            if candidate_facts:
                 payload = self._extraction_provider.summarize_scenario(
-                    [fact.content for fact in created_facts], evidence_refs, self._extraction_model
+                    [fact.content for fact in candidate_facts], evidence_refs, self._extraction_model
                 )
-                scenario = self._repository.create_scenario(
-                    scope="project",
-                    project=resolved_project,
-                    title=payload["title"].strip(),
-                    summary=payload["summary"].strip(),
-                    fact_ids=[fact.id for fact in created_facts],
-                    evidence_refs=evidence_refs,
+                title = payload.get("title") if isinstance(payload, dict) else None
+                summary = payload.get("summary") if isinstance(payload, dict) else None
+                if not isinstance(title, str) or not title.strip() or not isinstance(summary, str) or not summary.strip():
+                    raise ValueError("scenario response must contain non-empty title and summary")
+                scenario = self._repository.find_duplicate_scenario(
+                    scope="project", project=resolved_project, evidence_refs=evidence_refs
                 )
+                if scenario is None:
+                    scenario = self._repository.create_scenario(
+                        scope="project",
+                        project=resolved_project,
+                        title=title.strip(),
+                        summary=summary.strip(),
+                        fact_ids=[fact.id for fact in candidate_facts],
+                        evidence_refs=evidence_refs,
+                    )
+                for fact in candidate_facts:
+                    if fact.status == "candidate":
+                        self.update_status(fact.id, "active", project=resolved_project)
+            self._repository.record_event(
+                entity_type="memory_pipeline",
+                entity_id=f"{resolved_project}\x00{chat_id or ''}",
+                event_type="external_memory_extraction",
+                payload={**audit_context, "outcome": "completed", "extracted_fact_count": len(candidate_facts)},
+            )
             last_updated_at = entries[-1]["updated_at"]
             self._repository.save_checkpoint(
                 project=resolved_project,
@@ -510,17 +578,25 @@ class MemoryService:
                 project=resolved_project,
                 chat_id=chat_id,
                 processed_history=len(entries),
-                extracted_facts=len(created_facts),
+                extracted_facts=len(candidate_facts),
                 scenario=scenario,
                 checkpoint_status="completed",
             )
         except Exception as exc:
+            public_error = f"memory extraction failed ({type(exc).__name__})"
+            if "audit_context" in locals():
+                self._repository.record_event(
+                    entity_type="memory_pipeline",
+                    entity_id=f"{resolved_project}\x00{chat_id or ''}",
+                    event_type="external_memory_extraction",
+                    payload={**audit_context, "outcome": "error", "error_type": type(exc).__name__},
+                )
             self._repository.save_checkpoint(
                 project=resolved_project,
                 chat_id=chat_id,
                 last_history_updated_at=after_updated_at,
                 processed_count=0,
                 status="error",
-                last_error=str(exc),
+                last_error=public_error,
             )
-            raise
+            raise RuntimeError(public_error) from None

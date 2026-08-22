@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from anchor.adapters.sqlite_memory_repository import (
@@ -136,7 +137,7 @@ class SqliteMemoryRepositoryTest(unittest.TestCase):
         self.assertEqual(deleted.status if deleted else None, "deleted")
 
     def test_document_deletion_helper_also_invalidates_chunk_evidence(self) -> None:
-        with sqlite3.connect(self.database_path) as connection:
+        with closing(sqlite3.connect(self.database_path)) as connection:
             connection.execute(
                 "INSERT INTO documents (id, project, document_type, title, body, source, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("document-1", "repo-a", "history", "History", "body", "test", "", "now", "now"),

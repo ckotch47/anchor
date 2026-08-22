@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from anchor.adapters.sqlite_support import configure_connection, sqlite_write_lock, utc_now_iso
+from anchor.adapters.sqlite_support import configure_connection, connect_trusted_sqlite, sqlite_write_lock, utc_now_iso
 from anchor.config import default_database_path
 
 
@@ -420,6 +420,184 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memory_scenarios_fts USING fts5(
 ALTER TABLE memory_pipeline_checkpoints ADD COLUMN pending_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE memory_pipeline_checkpoints ADD COLUMN pending_since REAL;
 ALTER TABLE memory_pipeline_checkpoints ADD COLUMN last_extraction_at REAL;
+        """.strip(),
+    ),
+    Migration(
+        version=11,
+        name="0011_allow_file_chunk_embeddings",
+        sql="""
+PRAGMA foreign_keys=OFF;
+DROP INDEX IF EXISTS idx_chunk_embeddings_model;
+DROP INDEX IF EXISTS idx_chunk_embeddings_project_model;
+ALTER TABLE chunk_embeddings RENAME TO chunk_embeddings_legacy;
+CREATE TABLE chunk_embeddings (
+    chunk_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    embedding BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    project TEXT NOT NULL DEFAULT 'workspace',
+    metatags TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (chunk_id, model)
+);
+INSERT INTO chunk_embeddings (chunk_id, model, embedding, created_at, project, metatags)
+SELECT chunk_id, model, embedding, created_at, project, metatags
+FROM chunk_embeddings_legacy;
+DROP TABLE chunk_embeddings_legacy;
+CREATE INDEX idx_chunk_embeddings_model ON chunk_embeddings(model);
+CREATE INDEX idx_chunk_embeddings_project_model ON chunk_embeddings(project, model);
+PRAGMA foreign_keys=ON;
+""".strip(),
+    ),
+    Migration(
+        version=12,
+        name="0012_task_external_keys",
+        sql="""
+ALTER TABLE tasks ADD COLUMN external_key TEXT;
+
+CREATE TABLE IF NOT EXISTS task_external_key_quarantine (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project TEXT NOT NULL,
+    external_key TEXT NOT NULL,
+    document_ids TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    detected_at TEXT NOT NULL
+);
+
+INSERT INTO task_external_key_quarantine(
+    project, external_key, document_ids, reason, detected_at
+)
+SELECT d.project, d.source_ref, json_group_array(d.id),
+       'duplicate_legacy_myskills_identity', CURRENT_TIMESTAMP
+FROM documents AS d
+JOIN tasks AS t ON t.document_id = d.id AND t.project = d.project
+WHERE d.source = 'myskills-orchestration' AND d.source_ref <> ''
+GROUP BY d.project, d.source_ref
+HAVING COUNT(*) > 1;
+
+UPDATE tasks
+SET external_key = (
+    SELECT d.source_ref FROM documents AS d
+    WHERE d.id = tasks.document_id AND d.project = tasks.project
+      AND d.source = 'myskills-orchestration' AND d.source_ref <> ''
+)
+WHERE EXISTS (
+    SELECT 1 FROM documents AS d
+    WHERE d.id = tasks.document_id AND d.project = tasks.project
+      AND d.source = 'myskills-orchestration' AND d.source_ref <> ''
+      AND 1 = (
+          SELECT COUNT(*)
+          FROM documents AS duplicate
+          JOIN tasks AS duplicate_task
+            ON duplicate_task.document_id = duplicate.id
+           AND duplicate_task.project = duplicate.project
+          WHERE duplicate.project = d.project
+            AND duplicate.source = 'myskills-orchestration'
+            AND duplicate.source_ref = d.source_ref
+      )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tasks_project_external_key
+    ON tasks(project, external_key)
+    WHERE external_key IS NOT NULL AND external_key <> '';
+CREATE INDEX IF NOT EXISTS idx_task_external_key_quarantine_project
+    ON task_external_key_quarantine(project, external_key);
+""".strip(),
+    ),
+    Migration(
+        version=13,
+        name="0013_quarantine_cross_project_links",
+        sql="""
+CREATE TABLE IF NOT EXISTS document_link_quarantine (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_document_id TEXT NOT NULL,
+    to_document_id TEXT NOT NULL,
+    link_type TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    detected_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS task_relation_quarantine (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_document_id TEXT NOT NULL,
+    task_project TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    related_document_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    detected_at TEXT NOT NULL
+);
+
+INSERT INTO document_link_quarantine(
+    from_document_id, to_document_id, link_type, reason, detected_at
+)
+SELECT link.from_document_id, link.to_document_id, link.link_type,
+       'cross_project_or_deleted_endpoint', CURRENT_TIMESTAMP
+FROM document_links AS link
+LEFT JOIN documents AS source ON source.id = link.from_document_id
+LEFT JOIN documents AS target ON target.id = link.to_document_id
+WHERE source.id IS NULL OR target.id IS NULL
+   OR source.deleted_at IS NOT NULL OR target.deleted_at IS NOT NULL
+   OR source.project <> target.project;
+
+DELETE FROM document_links
+WHERE EXISTS (
+    SELECT 1 FROM document_link_quarantine AS quarantine
+    WHERE quarantine.from_document_id = document_links.from_document_id
+      AND quarantine.to_document_id = document_links.to_document_id
+      AND quarantine.link_type = document_links.link_type
+);
+
+INSERT INTO task_relation_quarantine(
+    task_document_id, task_project, relation_type, related_document_id,
+    reason, detected_at
+)
+SELECT t.document_id, t.project, 'parent', t.parent_document_id,
+       'cross_project_or_deleted_endpoint', CURRENT_TIMESTAMP
+FROM tasks AS t
+LEFT JOIN documents AS related ON related.id = t.parent_document_id
+LEFT JOIN tasks AS related_task
+  ON related_task.document_id = related.id AND related_task.project = related.project
+WHERE t.parent_document_id IS NOT NULL
+  AND (
+      related.id IS NULL OR related.deleted_at IS NOT NULL
+      OR related.project <> t.project OR related.document_type <> 'task'
+      OR related_task.document_id IS NULL
+  )
+UNION ALL
+SELECT t.document_id, t.project, 'blocked_by', t.blocked_by_document_id,
+       'cross_project_or_deleted_endpoint', CURRENT_TIMESTAMP
+FROM tasks AS t
+LEFT JOIN documents AS related ON related.id = t.blocked_by_document_id
+LEFT JOIN tasks AS related_task
+  ON related_task.document_id = related.id AND related_task.project = related.project
+WHERE t.blocked_by_document_id IS NOT NULL
+  AND (
+      related.id IS NULL OR related.deleted_at IS NOT NULL
+      OR related.project <> t.project OR related.document_type <> 'task'
+      OR related_task.document_id IS NULL
+  );
+
+UPDATE tasks
+SET parent_document_id = NULL
+WHERE EXISTS (
+    SELECT 1 FROM task_relation_quarantine AS quarantine
+    WHERE quarantine.task_document_id = tasks.document_id
+      AND quarantine.task_project = tasks.project
+      AND quarantine.relation_type = 'parent'
+      AND quarantine.related_document_id = tasks.parent_document_id
+);
+
+UPDATE tasks
+SET blocked_by_document_id = NULL
+WHERE EXISTS (
+    SELECT 1 FROM task_relation_quarantine AS quarantine
+    WHERE quarantine.task_document_id = tasks.document_id
+      AND quarantine.task_project = tasks.project
+      AND quarantine.relation_type = 'blocked_by'
+      AND quarantine.related_document_id = tasks.blocked_by_document_id
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_relation_quarantine_project
+    ON task_relation_quarantine(task_project, task_document_id);
 """.strip(),
     ),
 ]
@@ -430,9 +608,9 @@ class SqliteMigrationRepository:
         self._database_path = database_path or default_database_path()
 
     def apply_pending(self) -> MigrationApplicationResult:
-        self._database_path.parent.mkdir(parents=True, exist_ok=True)
+        self._database_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         with sqlite_write_lock(self._database_path):
-            connection = sqlite3.connect(self._database_path)
+            connection = connect_trusted_sqlite(self._database_path)
             try:
                 self._configure(connection)
                 self._ensure_migrations_table(connection)
@@ -441,11 +619,9 @@ class SqliteMigrationRepository:
                 for migration in MIGRATIONS:
                     if migration.version in applied_versions:
                         continue
-                    connection.executescript(migration.sql)
-                    self._record_migration(connection, migration)
+                    self._apply_migration(connection, migration)
                     applied += 1
                     applied_versions.append(migration.version)
-                connection.commit()
                 return MigrationApplicationResult(
                     database_path=self._database_path,
                     applied=applied,
@@ -458,8 +634,51 @@ class SqliteMigrationRepository:
             finally:
                 connection.close()
 
+    def _apply_migration(
+        self, connection: sqlite3.Connection, migration: Migration
+    ) -> None:
+        statements = self._migration_statements(migration.sql)
+        manages_foreign_keys = any(
+            statement.strip().lower() == "pragma foreign_keys=off;"
+            for statement in statements
+        )
+        if manages_foreign_keys:
+            connection.execute("PRAGMA foreign_keys=OFF")
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            for statement in statements:
+                normalized = statement.strip().lower()
+                if normalized in {
+                    "pragma foreign_keys=off;",
+                    "pragma foreign_keys=on;",
+                }:
+                    continue
+                connection.execute(statement)
+            self._record_migration(connection, migration)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            if manages_foreign_keys:
+                connection.execute("PRAGMA foreign_keys=ON")
+
+    @staticmethod
+    def _migration_statements(sql: str) -> list[str]:
+        statements: list[str] = []
+        buffer = ""
+        for character in sql:
+            buffer += character
+            if character == ";" and sqlite3.complete_statement(buffer):
+                if buffer.strip():
+                    statements.append(buffer.strip())
+                buffer = ""
+        if buffer.strip():
+            raise ValueError("migration SQL must end with a complete statement")
+        return statements
+
     def _configure(self, connection: sqlite3.Connection) -> None:
-        configure_connection(connection, busy_timeout_ms=250)
+        configure_connection(connection, busy_timeout_ms=250, database_path=self._database_path)
 
     def _ensure_migrations_table(self, connection: sqlite3.Connection) -> None:
         connection.execute(

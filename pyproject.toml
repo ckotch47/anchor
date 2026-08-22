@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anchor"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local CLI tool for agents with compact retrieval and SQLite storage."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,12 +13,15 @@ dependencies = [
   "pydantic>=2.7,<3.0",
   "openai>=1.40,<2.0",
   "mcp>=1.27,<2.0",
-  "sqliteai-vector>=1.0.0,<2.0.0",
 ]
 
 [project.optional-dependencies]
+vector = [
+  "sqliteai-vector>=1.0.0,<2.0.0",
+]
 dev = [
   "build>=1.2,<2.0",
+  "mypy>=1.19,<2.0",
   "ruff>=0.6,<1.0",
 ]
 
@@ -29,6 +32,16 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "RUF"]
 ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/anchor"]
+check_untyped_defs = true
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
 
 [project.scripts]
 anchor = "anchor.main:main"

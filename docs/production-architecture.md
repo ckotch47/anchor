@@ -100,7 +100,7 @@ Retrieval is hybrid and should exist from the first production slice.
 
 Operational maintenance:
 
-- `health` checks the `settings` table and runs scheduled maintenance when `maintenance.last_vacuum` is older than 7 days.
+- `health` is a side-effect-free readiness snapshot over storage, integrity, migrations, and derived-index state.
 - `db compact` is the explicit cleanup path for soft-deleted rows, FTS rebuilds, vacuum, and final WAL truncation.
 - FTS fragmentation should be handled with explicit rebuilds instead of assuming SQLite will compact it automatically.
 - Soft-deleted rows should be physically purged on a maintenance schedule because they continue to occupy storage and index space until vacuumed.

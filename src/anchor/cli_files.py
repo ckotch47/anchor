@@ -40,6 +40,35 @@ def files_index(
         response_formatter.emit_error("files", "DB_MIGRATION_FAILED", str(exc))
 
 
+@files_app.command(name="reindex")
+def files_reindex(
+    root: Annotated[list[str] | None, typer.Option("--root")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+) -> None:
+    """Rebuild file chunks and embeddings even when file content is unchanged."""
+    try:
+        container = build_container(profile=profile)
+        resolved_project = resolve_project(container, project)
+        result: FilesIndexResult = container.files_service.reindex(roots=root, project=resolved_project)
+        typer.echo(
+            json.dumps(
+                response_formatter.format_success(
+                    "files.reindex",
+                    result.model_dump(),
+                    container,
+                    extra_meta={"project": resolved_project},
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    except ValueError as exc:
+        response_formatter.emit_error("files.reindex", "INVALID_ARGS", str(exc))
+    except Exception as exc:
+        response_formatter.emit_error("files.reindex", "DB_MIGRATION_FAILED", str(exc))
+
+
 @files_app.command(name="get")
 def files_get(
     file_id: Annotated[str | None, typer.Option("--id")] = None,

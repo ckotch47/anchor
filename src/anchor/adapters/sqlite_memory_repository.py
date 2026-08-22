@@ -233,8 +233,9 @@ class SqliteMemoryRepository(SqliteRepositoryBase):
         checkpoint = self.get_checkpoint(project=project, chat_id=chat_id)
         if checkpoint is None:
             return None
+        pending_count = checkpoint.get("pending_count")
         return {
-            "pending_count": int(checkpoint.get("pending_count") or 0),
+            "pending_count": pending_count if isinstance(pending_count, int) else 0,
             "pending_since": checkpoint.get("pending_since"),
             "last_extraction_at": checkpoint.get("last_extraction_at"),
         }
@@ -310,6 +311,46 @@ class SqliteMemoryRepository(SqliteRepositoryBase):
             raise RuntimeError("created memory scenario could not be reloaded")
         return self._row_to_scenario(row)
 
+    def find_duplicate_scenario(
+        self,
+        *,
+        scope: str,
+        project: str | None,
+        evidence_refs: list[str],
+    ) -> MemoryScenario | None:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM memory_scenarios WHERE scope = ? AND project IS ? AND status = 'active'",
+                (scope, project),
+            ).fetchall()
+        expected = set(evidence_refs)
+        for row in rows:
+            if set(self._decode_evidence_refs(row["evidence_refs"])) == expected:
+                return self._row_to_scenario(row)
+        return None
+
+    def record_event(
+        self,
+        *,
+        entity_type: str,
+        entity_id: str,
+        event_type: str,
+        payload: dict[str, object],
+    ) -> None:
+        with self._write_connect() as connection:
+            connection.execute(
+                "INSERT INTO events (id, entity_type, entity_id, event_type, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    uuid7_str(),
+                    entity_type,
+                    entity_id,
+                    event_type,
+                    json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                    utc_now_iso(),
+                ),
+            )
+            connection.commit()
+
     def search_scenarios(
         self,
         query: str,
@@ -365,12 +406,12 @@ class SqliteMemoryRepository(SqliteRepositoryBase):
                 f"SELECT * FROM memory_facts WHERE {' AND '.join(where)} ORDER BY fact_type, scope, project, source_chat_id, updated_at DESC",
                 params,
             ).fetchall()
-        grouped: dict[tuple[str, str | None, str | None, str], list[MemoryFact]] = {}
+        grouped: dict[tuple[MemoryScope, str | None, str | None, str], list[MemoryFact]] = {}
         for row in rows:
             fact = self._row_to_fact(row)
             key = (fact.scope, fact.project if fact.scope == "project" else None, fact.source_chat_id if fact.scope == "chat" else None, fact.fact_type)
             grouped.setdefault(key, []).append(fact)
-        conflicts = []
+        conflicts: list[tuple[MemoryScope, str | None, str | None, str, list[MemoryFact]]] = []
         for (scope, fact_project, source_chat_id, fact_type), facts in grouped.items():
             contents = {fact.content.casefold().strip() for fact in facts}
             if len(contents) > 1:
@@ -437,12 +478,20 @@ class SqliteMemoryRepository(SqliteRepositoryBase):
     def _checkpoint_key(project: str, chat_id: str | None) -> str:
         return f"{project}\x00{chat_id or ''}"
 
-    def update_status(self, fact_id: str, status: MemoryFactStatus) -> MemoryFact | None:
+    def update_status(
+        self,
+        fact_id: str,
+        status: MemoryFactStatus,
+        *,
+        source_project: str,
+        expected_status: MemoryFactStatus,
+    ) -> MemoryFact | None:
         now = utc_now_iso()
         with self._write_connect() as connection:
             cursor = connection.execute(
-                "UPDATE memory_facts SET status = ?, updated_at = ? WHERE id = ?",
-                (status, now, fact_id),
+                "UPDATE memory_facts SET status = ?, updated_at = ? "
+                "WHERE id = ? AND project = ? AND status = ?",
+                (status, now, fact_id, source_project, expected_status),
             )
             connection.commit()
         if cursor.rowcount == 0:
@@ -456,6 +505,8 @@ class SqliteMemoryRepository(SqliteRepositoryBase):
         scope: MemoryScope,
         project: str | None,
         source_chat_id: str | None,
+        source_project: str,
+        expected_status: MemoryFactStatus,
     ) -> MemoryFact | None:
         self._validate_scope_requirements(scope, project, source_chat_id)
         now = utc_now_iso()
@@ -463,10 +514,18 @@ class SqliteMemoryRepository(SqliteRepositoryBase):
             cursor = connection.execute(
                 """
                 UPDATE memory_facts
-                SET scope = ?, project = ?, source_chat_id = ?, updated_at = ?
-                WHERE id = ?
+                SET scope = ?, project = ?, source_chat_id = ?, status = 'active', updated_at = ?
+                WHERE id = ? AND project = ? AND status = ?
                 """,
-                (scope, project, source_chat_id, now, fact_id),
+                (
+                    scope,
+                    project,
+                    source_chat_id,
+                    now,
+                    fact_id,
+                    source_project,
+                    expected_status,
+                ),
             )
             connection.commit()
         if cursor.rowcount == 0:

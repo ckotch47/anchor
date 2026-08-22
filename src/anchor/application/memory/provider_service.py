@@ -5,9 +5,10 @@ import os
 import re
 from typing import Any
 
-from openai import OpenAI
+from openai import DefaultHttpxClient, OpenAI
 
 from anchor.application.provider_ports import MemoryExtractionProviderPort
+from anchor.application.provider_security import raise_provider_error, validate_provider_endpoint
 
 _SECRET_PATTERNS = (
     re.compile(r"(?i)\b(?:sk-or-v1-|sk-)[A-Za-z0-9_-]{16,}"),
@@ -28,8 +29,15 @@ def redact_sensitive_text(text: str) -> str:
 
 class OpenAICompatibleMemoryExtractionProvider(MemoryExtractionProviderPort):
     def __init__(self, base_url: str, api_key_env: str) -> None:
-        self._base_url = base_url
+        endpoint = validate_provider_endpoint(base_url)
+        self._base_url = endpoint.base_url
         self._api_key_env = api_key_env
+        self.endpoint = endpoint
+        self._client = OpenAI(
+            base_url=self._base_url,
+            api_key=os.getenv(self._api_key_env, "EMPTY"),
+            http_client=DefaultHttpxClient(follow_redirects=False),
+        )
 
     def extract_facts(self, text: str, evidence_refs: list[str], model: str) -> list[dict[str, Any]]:
         response = self._complete(
@@ -64,14 +72,15 @@ class OpenAICompatibleMemoryExtractionProvider(MemoryExtractionProviderPort):
         return payload
 
     def _complete(self, *, model: str, system: str, user: str) -> str:
-        api_key = os.getenv(self._api_key_env, "EMPTY")
-        client = OpenAI(base_url=self._base_url, api_key=api_key)
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            temperature=0,
-            response_format={"type": "json_object"},
-        )
+        try:
+            response = self._client.chat.completions.create(
+                model=model,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                temperature=0,
+                response_format={"type": "json_object"},
+            )
+        except Exception as exc:
+            raise_provider_error("memory", exc)
         return response.choices[0].message.content or ""
 
     @staticmethod

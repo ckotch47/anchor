@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import builtins
 import json
 from collections import OrderedDict
 from time import monotonic
@@ -9,15 +10,18 @@ from anchor.adapters.sqlite_ids import ensure_uuid7_str, uuid7_str
 from anchor.adapters.sqlite_notes_repository import SqliteNotesRepository
 from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.notes.models import (
+    NoteListItem,
     NoteRecord,
     NotesListResult,
     NotesSearchCandidate,
     NotesSearchHit,
     NotesSearchResult,
 )
+from anchor.application.provider_security import safe_provider_error
 from anchor.application.retrieval.compact_items import compact_note_list_item, compact_note_search_item
 from anchor.application.retrieval.document_chunking import DocumentChunkingService, count_tokens
 from anchor.application.retrieval.rerank_service import RerankService
+from anchor.application.retrieval.search_query import MAX_RETRIEVAL_LIMIT, validate_retrieval_limit
 from anchor.application.retrieval.search_scoring import combine_search_scores
 from anchor.application.system.metadata_service import MetadataSchemaService
 
@@ -131,8 +135,7 @@ class NotesService:
         cursor: str | None = None,
         view: str = "compact",
     ) -> NotesListResult:
-        if limit <= 0:
-            raise ValueError("limit must be greater than zero")
+        limit = validate_retrieval_limit(limit)
         cursor_id = self._decode_cursor(cursor)
         notes = self._repository.list(
             limit + 1,
@@ -143,9 +146,14 @@ class NotesService:
         if len(notes) > limit:
             next_cursor = self._encode_cursor(notes[limit - 1].id)
             notes = notes[:limit]
+        projected_notes: builtins.list[NoteRecord | NoteListItem] = []
+        if view == "full":
+            projected_notes.extend(notes)
+        else:
+            projected_notes.extend(compact_note_list_item(note) for note in notes)
         return NotesListResult(
             count=len(notes),
-            notes=notes if view == "full" else [compact_note_list_item(note) for note in notes],
+            notes=projected_notes,
             next_cursor=next_cursor,
         )
 
@@ -172,15 +180,14 @@ class NotesService:
         budget_tokens: int | None = None,
         view: str = "compact",
         prefer_lexical_only: bool = False,
-        query_embedding: list[float] | None = None,
+        query_embedding: builtins.list[float] | None = None,
     ) -> NotesSearchResult:
         self._require_non_empty(query, "query")
-        if limit <= 0:
-            raise ValueError("limit must be greater than zero")
+        limit = validate_retrieval_limit(limit)
         resolved_project = project or self._project
         if not prefer_lexical_only:
             self._drain_pending_embeddings(resolved_project)
-        candidate_limit = max(limit * 4, limit)
+        candidate_limit = min(max(limit * 4, limit), MAX_RETRIEVAL_LIMIT)
         candidates = self._collect_candidates(
             query,
             candidate_limit,
@@ -259,6 +266,7 @@ class NotesService:
                 result = self._embedding_service.embed_chunks(
                     [chunk.id for chunk in chunks],
                     [chunk.chunk_text for chunk in chunks],
+                    project=project,
                 )
                 self._repository.store_chunk_embeddings(
                     result.embeddings,
@@ -270,7 +278,10 @@ class NotesService:
                     self._repository.mark_embedding_index_ready(document_id)
             except Exception as exc:
                 if hasattr(self._repository, "mark_embedding_index_error"):
-                    self._repository.mark_embedding_index_error(document_id, last_error=str(exc))
+                    self._repository.mark_embedding_index_error(
+                        document_id,
+                        last_error=safe_provider_error("embeddings", exc),
+                    )
 
     @staticmethod
     def _serialize_metatags(metatags: dict[str, object]) -> str:
@@ -305,14 +316,16 @@ class NotesService:
         project: str,
         *,
         prefer_lexical_only: bool = False,
-        query_embedding: list[float] | None = None,
-    ) -> list[NotesSearchCandidate]:
+        query_embedding: builtins.list[float] | None = None,
+    ) -> builtins.list[NotesSearchCandidate]:
         lexical_rows = self._search_lexical_candidates(query, limit, project)
-        semantic_rows: list[NotesSearchCandidate] = []
+        semantic_rows: builtins.list[NotesSearchCandidate] = []
         resolved_query_embedding = query_embedding
         if resolved_query_embedding is None and self._embedding_service is not None and not prefer_lexical_only:
             try:
-                resolved_query_embedding = self._embedding_service.embed_texts([query]).embeddings[0].embedding
+                resolved_query_embedding = self._embedding_service.embed_texts(
+                    [query], projects=[project]
+                ).embeddings[0].embedding
             except Exception:
                 resolved_query_embedding = None
         if resolved_query_embedding is not None and not prefer_lexical_only:
@@ -333,9 +346,17 @@ class NotesService:
             if candidate.snippet and len(candidate.snippet) > len(current.snippet):
                 current.snippet = candidate.snippet
             current.token_count = max(current.token_count, candidate.token_count)
-        return list(merged.values())
+        return sorted(
+            merged.values(),
+            key=lambda candidate: combine_search_scores(
+                lexical_score=candidate.lexical_score,
+                vector_score=candidate.vector_score,
+                rerank_score=None,
+            ),
+            reverse=True,
+        )[:limit]
 
-    def _rerank_candidates(self, query: str, candidates: list[NotesSearchCandidate]) -> list[NotesSearchCandidate]:
+    def _rerank_candidates(self, query: str, candidates: builtins.list[NotesSearchCandidate]) -> builtins.list[NotesSearchCandidate]:
         if not candidates:
             return []
         if self._rerank_service is None:
@@ -344,6 +365,7 @@ class NotesService:
             rerank_scores = self._rerank_service.rerank(
                 query,
                 [self._candidate_text(candidate) for candidate in candidates],
+                project=candidates[0].note.project,
             )
         except Exception:
             return candidates
@@ -351,7 +373,7 @@ class NotesService:
             candidate.rerank_score = rerank_score
         return candidates
 
-    def _deduplicate_by_note(self, candidates: list[NotesSearchCandidate]) -> list[NotesSearchCandidate]:
+    def _deduplicate_by_note(self, candidates: builtins.list[NotesSearchCandidate]) -> builtins.list[NotesSearchCandidate]:
         best_by_note_id: OrderedDict[str, NotesSearchCandidate] = OrderedDict()
         for candidate in sorted(
             candidates,
@@ -367,10 +389,10 @@ class NotesService:
                 best_by_note_id[note_id] = candidate
         return list(best_by_note_id.values())
 
-    def _trim_to_budget(self, candidates: list[NotesSearchCandidate], budget_tokens: int) -> list[NotesSearchCandidate]:
+    def _trim_to_budget(self, candidates: builtins.list[NotesSearchCandidate], budget_tokens: int) -> builtins.list[NotesSearchCandidate]:
         if budget_tokens <= 0:
             return []
-        trimmed: list[NotesSearchCandidate] = []
+        trimmed: builtins.list[NotesSearchCandidate] = []
         total_tokens = 0
         for candidate in candidates:
             candidate_cost = self._estimate_candidate_tokens(candidate)
@@ -387,7 +409,7 @@ class NotesService:
     def _candidate_text(candidate: NotesSearchCandidate) -> str:
         return f"{candidate.note.title}\n{candidate.snippet}".strip()
 
-    def _search_lexical_candidates(self, query: str, limit: int, project: str) -> list[NotesSearchCandidate]:
+    def _search_lexical_candidates(self, query: str, limit: int, project: str) -> builtins.list[NotesSearchCandidate]:
         if hasattr(self._repository, "search_lexical_candidates"):
             return self._repository.search_lexical_candidates(query=query, limit=limit, project=project)
         results = self._repository.search(query=query, limit=limit, project=project)
@@ -404,10 +426,10 @@ class NotesService:
 
     def _search_vector_candidates(
         self,
-        query_embedding: list[float],
+        query_embedding: builtins.list[float],
         limit: int,
         project: str,
-    ) -> list[NotesSearchCandidate]:
+    ) -> builtins.list[NotesSearchCandidate]:
         if not hasattr(self._repository, "search_vector_candidates"):
             return []
         return self._repository.search_vector_candidates(query_embedding=query_embedding, limit=limit, project=project)

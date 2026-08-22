@@ -10,6 +10,7 @@ class DocumentLinkSummary(BaseModel):
 
 
 class DocumentLinkRecord(BaseModel):
+    project: str
     source_id: str
     target_id: str
     relation_type: str

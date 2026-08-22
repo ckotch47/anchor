@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from anchor.adapters.sqlite_support import configure_connection, sqlite_write_lock
+from anchor.adapters.sqlite_support import configure_connection, connect_trusted_sqlite, sqlite_write_lock
 from anchor.adapters.sqlite_vector_support import initialize_chunk_embeddings_vector, try_load_sqlite_vector_extension
 from anchor.config import default_database_path
 
@@ -17,9 +17,9 @@ class SqliteRepositoryBase:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self._database_path)
+        connection = connect_trusted_sqlite(self._database_path)
         connection.row_factory = sqlite3.Row
-        configure_connection(connection, busy_timeout_ms=250)
+        configure_connection(connection, busy_timeout_ms=250, database_path=self._database_path)
         try_load_sqlite_vector_extension(connection)
         if self._vector_dimension is not None:
             initialize_chunk_embeddings_vector(connection, self._vector_dimension)

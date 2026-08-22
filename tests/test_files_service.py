@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -475,8 +476,8 @@ class FilesServiceTest(unittest.TestCase):
                 ]
 
         class FakeEmbeddingService:
-            def embed_texts(self, texts: list[str]) -> ChunkEmbeddingsResult:
-                del texts
+            def embed_texts(self, texts: list[str], *, projects: list[str] | None = None) -> ChunkEmbeddingsResult:
+                del texts, projects
                 return ChunkEmbeddingsResult(
                     model="fake",
                     embeddings=[
@@ -485,8 +486,8 @@ class FilesServiceTest(unittest.TestCase):
                 )
 
         class FakeRerankService:
-            def rerank(self, query: str, texts: list[str]) -> list[float]:
-                del query, texts
+            def rerank(self, query: str, texts: list[str], *, project: str | None = None) -> list[float]:
+                del query, texts, project
                 return [0.95]
 
         service = FilesService(
@@ -644,6 +645,80 @@ class FilesServiceTest(unittest.TestCase):
         self.assertGreaterEqual(indexed.skipped, 1)
         self.assertEqual(result.count, 1)
         self.assertEqual(result.results[0].file.path, str((root / "app.py").resolve()))
+
+    def test_index_does_not_follow_symlink_outside_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            root = workspace / "repo"
+            root.mkdir()
+            outside = workspace / "outside-secret.txt"
+            outside.write_text("EXTERNAL_SECRET_NEVER_INDEX", encoding="utf-8")
+            (root / "linked-secret.txt").symlink_to(outside)
+
+            db_path = workspace / "anchor.sqlite3"
+            SqliteMigrationRepository(database_path=db_path).apply_pending()
+            service = FilesService(
+                repository=SqliteFilesRepository(database_path=db_path),
+                chunking_service=FileChunkingService(),
+                project="repo-a",
+                roots=[str(root)],
+            )
+
+            indexed = service.index(project="repo-a")
+            result = service.search("EXTERNAL_SECRET_NEVER_INDEX", project="repo-a")
+
+        self.assertEqual(indexed.indexed, 0)
+        self.assertGreaterEqual(indexed.skipped, 1)
+        self.assertEqual(result.count, 0)
+
+    def test_external_symlinked_gitignore_cannot_control_indexing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            root = workspace / "repo"
+            root.mkdir()
+            (root / "visible.py").write_text("VISIBLE_MARKER = True\n", encoding="utf-8")
+            external_ignore = workspace / "external.gitignore"
+            external_ignore.write_text("visible.py\n", encoding="utf-8")
+            (root / ".gitignore").symlink_to(external_ignore)
+
+            db_path = workspace / "anchor.sqlite3"
+            SqliteMigrationRepository(database_path=db_path).apply_pending()
+            service = FilesService(
+                repository=SqliteFilesRepository(database_path=db_path),
+                chunking_service=FileChunkingService(),
+                project="repo-a",
+                roots=[str(root)],
+            )
+
+            indexed = service.index(project="repo-a")
+            result = service.search("VISIBLE_MARKER", project="repo-a")
+
+        self.assertEqual(indexed.indexed, 1)
+        self.assertEqual(result.count, 1)
+
+    def test_gitignore_fifo_is_rejected_without_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            root = workspace / "repo"
+            root.mkdir()
+            os.mkfifo(root / ".gitignore", mode=0o600)
+            (root / "visible.py").write_text("VISIBLE_FIFO_MARKER = True\n", encoding="utf-8")
+
+            db_path = workspace / "anchor.sqlite3"
+            SqliteMigrationRepository(database_path=db_path).apply_pending()
+            service = FilesService(
+                repository=SqliteFilesRepository(database_path=db_path),
+                chunking_service=FileChunkingService(),
+                project="repo-a",
+                roots=[str(root)],
+            )
+
+            indexed = service.index(project="repo-a")
+            result = service.search("VISIBLE_FIFO_MARKER", project="repo-a")
+
+        self.assertEqual(indexed.indexed, 1)
+        self.assertGreaterEqual(indexed.skipped, 1)
+        self.assertEqual(result.count, 1)
 
     def test_index_removes_deleted_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

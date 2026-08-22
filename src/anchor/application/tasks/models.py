@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from anchor.application.links.models import DocumentLinkSummary
+
+TaskStatus = Literal["open", "in_progress", "blocked", "done", "closed"]
 
 
 class TaskRecord(BaseModel):
@@ -16,8 +18,9 @@ class TaskRecord(BaseModel):
     body: str
     source: str
     source_ref: str
+    external_key: str | None = None
     task_kind: str
-    status: str
+    status: TaskStatus
     priority: int
     due_at: str | None
     started_at: str | None

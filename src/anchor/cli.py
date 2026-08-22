@@ -6,7 +6,8 @@ from typing import Annotated, Any
 import typer
 
 from anchor import __version__
-from anchor.cli_files import files_app, files_delete, files_get, files_index, files_list, files_search
+from anchor.capabilities import capability_snapshot
+from anchor.cli_files import files_app, files_delete, files_get, files_index, files_list, files_reindex, files_search
 from anchor.cli_history import history_app, history_append, history_delete, history_search, history_update
 from anchor.cli_links import links_add, links_app, links_delete, links_list
 from anchor.cli_memory import (
@@ -27,7 +28,6 @@ from anchor.cli_memory import (
 from anchor.cli_notes import notes_add, notes_app, notes_delete, notes_get, notes_list, notes_search, notes_update
 from anchor.cli_projects import projects_app, projects_list
 from anchor.cli_search import search_command
-from anchor.cli_serve import serve
 from anchor.cli_shared import response_formatter
 from anchor.cli_tasks import (
     tasks_add,
@@ -40,7 +40,6 @@ from anchor.cli_tasks import (
     tasks_update,
 )
 from anchor.container import build_container
-from anchor.mcp_server import run_stdio
 
 __all__ = [
     "app",
@@ -50,6 +49,7 @@ __all__ = [
     "files_get",
     "files_index",
     "files_list",
+    "files_reindex",
     "files_search",
     "health",
     "history_append",
@@ -108,6 +108,15 @@ app.add_typer(memory_app, name="memory")
 app.command(name="search")(search_command)
 
 
+@app.command(name="capabilities")
+def capabilities_command(
+    format: Annotated[str, typer.Option("--format")] = "json",
+) -> None:
+    if format != "json":
+        response_formatter.emit_error("capabilities", "INVALID_ARGS", "capabilities supports only --format json")
+    typer.echo(json.dumps({"ok": True, "command": "capabilities", "data": capability_snapshot()}, ensure_ascii=False, indent=2))
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"anchor v{__version__}")
@@ -127,7 +136,7 @@ def health(
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
     try:
-        container = build_container(profile=profile)
+        container = build_container(profile=profile, auto_migrate=False)
         result = container.health_service.health()
         payload: dict[str, Any] = {
             "ok": True,
@@ -138,8 +147,12 @@ def health(
             },
         }
         typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
-    except Exception as exc:
-        response_formatter.emit_error("health", "DB_MIGRATION_FAILED", str(exc))
+        if not result.ready:
+            raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
+    except Exception:
+        response_formatter.emit_error("health", "DB_MIGRATION_FAILED", "Anchor health check failed")
 
 
 @app.command(name="config")
@@ -250,6 +263,11 @@ def db_command(
 
 @app.command(name="mcp")
 def mcp_command() -> None:
+    # Keep the optional MCP stack out of ordinary CLI startup. Besides reducing
+    # import cost, this prevents third-party settings warnings from leaking into
+    # machine-readable commands such as ``capabilities --format json``.
+    from anchor.mcp_server import run_stdio
+
     run_stdio()
 
 
@@ -260,7 +278,12 @@ def serve_command(
     profile: str | None = None,
     open_browser: bool = True,
 ) -> None:
-    serve(host=host, port=port, profile=profile, open_browser=open_browser)
+    from anchor.cli_serve import serve
+
+    try:
+        serve(host=host, port=port, profile=profile, open_browser=open_browser)
+    except ValueError as exc:
+        response_formatter.emit_error("serve", "INVALID_ARGS", str(exc))
 
 
 def _handle_db_migrate(container: Any) -> None:

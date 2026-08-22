@@ -11,14 +11,20 @@ from anchor.application.links.models import DocumentLinkListResult
 from anchor.application.memory.models import MemoryFactStatus, MemoryScope
 from anchor.application.retrieval.search_query import SearchQuery
 from anchor.application.system.projects_service import ProjectsListResult
+from anchor.capabilities import capability_snapshot
 from anchor.cli_shared import resolve_project, resolve_view, response_formatter
 from anchor.container import build_container
 
 mcp_app = FastMCP(name="anchor", instructions="Local CLI tool for agents")
 
 
-def _container(profile: str | None = None):
-    return build_container(profile=profile)
+@mcp_app.tool(name="capabilities", description="Return the versioned machine-readable Anchor contract")
+def capabilities() -> dict[str, Any]:
+    return {"ok": True, "command": "capabilities", "data": capability_snapshot()}
+
+
+def _container(profile: str | None = None, *, auto_migrate: bool = True):
+    return build_container(profile=profile, auto_migrate=auto_migrate)
 
 
 def _tool_result(
@@ -53,8 +59,8 @@ def _failure(command: str, code: str, message: str, container: Any) -> CallToolR
 
 
 @mcp_app.tool(name="health", description="Read the local runtime and database health")
-def health(profile: str | None = None) -> dict[str, Any]:
-    container = _container(profile)
+def health(profile: str | None = None) -> CallToolResult:
+    container = _container(profile, auto_migrate=False)
     result = container.health_service.health()
     return CallToolResult(
         content=[],
@@ -64,11 +70,12 @@ def health(profile: str | None = None) -> dict[str, Any]:
             container,
             view=container.config.runtime.default_view,
         ),
+        isError=not result.ready,
     )
 
 
 @mcp_app.tool(name="config_get", description="Read the current config")
-def config_get(profile: str | None = None) -> dict[str, Any]:
+def config_get(profile: str | None = None) -> CallToolResult:
     container = _container(profile)
     result = container.config_service.get(profile=profile)
     return CallToolResult(
@@ -77,7 +84,7 @@ def config_get(profile: str | None = None) -> dict[str, Any]:
 
 
 @mcp_app.tool(name="config_set", description="Update one config field")
-def config_set(section: str, key: str, value: str, profile: str | None = None) -> dict[str, Any]:
+def config_set(section: str, key: str, value: str, profile: str | None = None) -> CallToolResult:
     container = _container(profile)
     result = container.config_service.set(section=section, key=key, value=value, profile=profile)
     return CallToolResult(
@@ -86,7 +93,7 @@ def config_set(section: str, key: str, value: str, profile: str | None = None) -
 
 
 @mcp_app.tool(name="config_init", description="Initialize config from config.example.toml")
-def config_init(force: bool = False, profile: str | None = None) -> dict[str, Any]:
+def config_init(force: bool = False, profile: str | None = None) -> CallToolResult:
     container = _container(profile)
     result = container.config_service.init(force=force)
     return CallToolResult(
@@ -95,7 +102,7 @@ def config_init(force: bool = False, profile: str | None = None) -> dict[str, An
 
 
 @mcp_app.tool(name="db_migrate", description="Apply pending SQLite migrations")
-def db_migrate(profile: str | None = None) -> dict[str, Any]:
+def db_migrate(profile: str | None = None) -> CallToolResult:
     container = _container(profile)
     result = container.migration_service.migrate()
     checkpoint = container.maintenance_service.checkpoint_wal()
@@ -125,7 +132,7 @@ def db_compact(
     vacuum: bool = True,
     checkpoint: bool = True,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     if retention_days < 0:
         return _failure("db.compact", "INVALID_ARGS", "retention_days must be greater than or equal to zero", container)
@@ -163,7 +170,7 @@ def notes_add(
     project: str | None = None,
     metatags: dict[str, object] | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     result = container.notes_service.add(
@@ -190,7 +197,7 @@ def notes_update(
     correlation_id: str | None = None,
     metatags: dict[str, object] | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
@@ -217,14 +224,14 @@ def notes_list(
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
         resolved_view = resolve_view(container, view)
+        result = container.notes_service.list(limit=limit, cursor=cursor, project=resolved_project, view=resolved_view)
     except ValueError as exc:
         return _failure("notes.list", "INVALID_ARGS", str(exc), container)
-    result = container.notes_service.list(limit=limit, cursor=cursor, project=resolved_project, view=resolved_view)
     return _tool_result(
         "notes.list",
         {
@@ -239,7 +246,7 @@ def notes_list(
 
 
 @mcp_app.tool(name="notes_get", description="Get one note by id")
-def notes_get(note_id: str, project: str | None = None, profile: str | None = None) -> dict[str, Any]:
+def notes_get(note_id: str, project: str | None = None, profile: str | None = None) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     result = container.notes_service.get(note_id, project=resolved_project)
@@ -247,7 +254,7 @@ def notes_get(note_id: str, project: str | None = None, profile: str | None = No
 
 
 @mcp_app.tool(name="notes_delete", description="Soft-delete a note")
-def notes_delete(note_id: str, project: str | None = None, profile: str | None = None) -> dict[str, Any]:
+def notes_delete(note_id: str, project: str | None = None, profile: str | None = None) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     result = container.notes_service.delete(note_id, project=resolved_project)
@@ -261,14 +268,14 @@ def notes_search(
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
         resolved_view = resolve_view(container, view)
+        result = container.notes_service.search(query=query, limit=limit, project=resolved_project, view=resolved_view)
     except ValueError as exc:
         return _failure("notes.search", "INVALID_ARGS", str(exc), container)
-    result = container.notes_service.search(query=query, limit=limit, project=resolved_project, view=resolved_view)
     return _tool_result(
         "notes.search",
         response_formatter.format_search(
@@ -292,7 +299,7 @@ def history_append(
     project: str | None = None,
     metatags: dict[str, object] | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     result = container.history_service.append(
@@ -315,7 +322,7 @@ def history_update(
     project: str | None = None,
     metatags: dict[str, object] | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
@@ -340,19 +347,19 @@ def history_search(
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
         resolved_view = resolve_view(container, view)
+        result: HistorySearchResult = container.history_service.search(
+            query=query,
+            limit=limit,
+            project=resolved_project,
+            view=resolved_view,
+        )
     except ValueError as exc:
         return _failure("history.search", "INVALID_ARGS", str(exc), container)
-    result: HistorySearchResult = container.history_service.search(
-        query=query,
-        limit=limit,
-        project=resolved_project,
-        view=resolved_view,
-    )
     return _tool_result(
         "history.search",
         response_formatter.format_search(
@@ -369,7 +376,7 @@ def history_search(
 
 
 @mcp_app.tool(name="history_delete", description="Delete a history entry")
-def history_delete(history_id: str, project: str | None = None, profile: str | None = None) -> dict[str, Any]:
+def history_delete(history_id: str, project: str | None = None, profile: str | None = None) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
@@ -385,6 +392,7 @@ def tasks_add(
     body: str = "",
     source: str = "cli",
     source_ref: str = "",
+    external_key: str | None = None,
     priority: int = 0,
     due_at: str | None = None,
     task_kind: str = "task",
@@ -393,7 +401,7 @@ def tasks_add(
     project: str | None = None,
     metatags: dict[str, object] | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     result = container.tasks_service.add(
@@ -401,6 +409,7 @@ def tasks_add(
         body=body,
         source=source,
         source_ref=source_ref,
+        external_key=external_key,
         project=resolved_project,
         metatags=metatags or {},
         task_kind=task_kind,
@@ -419,16 +428,20 @@ def tasks_update(
     body: str | None = None,
     source: str | None = None,
     source_ref: str | None = None,
+    external_key: str | None = None,
     correlation_id: str | None = None,
     priority: int | None = None,
     due_at: str | None = None,
     task_kind: str | None = None,
     parent_document_id: str | None = None,
     blocked_by_document_id: str | None = None,
+    clear_due_at: bool = False,
+    clear_parent_document_id: bool = False,
+    clear_blocked_by_document_id: bool = False,
     project: str | None = None,
     metatags: dict[str, object] | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
@@ -438,6 +451,7 @@ def tasks_update(
             body=body,
             source=source,
             source_ref=source_ref,
+            external_key=external_key,
             correlation_id=correlation_id,
             project=resolved_project,
             metatags=metatags,
@@ -446,9 +460,14 @@ def tasks_update(
             due_at=due_at,
             parent_document_id=parent_document_id,
             blocked_by_document_id=blocked_by_document_id,
+            clear_due_at=clear_due_at,
+            clear_parent_document_id=clear_parent_document_id,
+            clear_blocked_by_document_id=clear_blocked_by_document_id,
         )
     except LookupError as exc:
         return _failure("tasks.update", "NOT_FOUND", str(exc), container)
+    except ValueError as exc:
+        return _failure("tasks.update", "INVALID_ARGS", str(exc), container)
     return _tool_result("tasks.update", {"task": result.model_dump()}, container, project=resolved_project)
 
 
@@ -458,7 +477,7 @@ def tasks_get(
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     result = container.tasks_service.get(task_id, project=resolved_project)
@@ -471,6 +490,34 @@ def tasks_get(
     )
 
 
+@mcp_app.tool(name="tasks_get_by_external_key", description="Get one task by exact project-scoped external key")
+def tasks_get_by_external_key(
+    external_key: str,
+    project: str | None = None,
+    view: str | None = None,
+    profile: str | None = None,
+) -> CallToolResult:
+    container = _container(profile)
+    try:
+        if project is None or not project.strip():
+            raise ValueError("tasks get-by-external-key requires project")
+        resolved_view = resolve_view(container, view)
+        result = container.tasks_service.get_by_external_key(
+            external_key, project=project
+        )
+    except LookupError as exc:
+        return _failure("tasks.get_by_external_key", "NOT_FOUND", str(exc), container)
+    except ValueError as exc:
+        return _failure("tasks.get_by_external_key", "INVALID_ARGS", str(exc), container)
+    return _tool_result(
+        "tasks.get_by_external_key",
+        {"task": result.model_dump()},
+        container,
+        project=project,
+        view=resolved_view,
+    )
+
+
 @mcp_app.tool(name="tasks_list", description="List tasks in the current project")
 def tasks_list(
     limit: int = 20,
@@ -478,14 +525,14 @@ def tasks_list(
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
         resolved_view = resolve_view(container, view)
+        result = container.tasks_service.list(limit=limit, cursor=cursor, project=resolved_project, view=resolved_view)
     except ValueError as exc:
         return _failure("tasks.list", "INVALID_ARGS", str(exc), container)
-    result = container.tasks_service.list(limit=limit, cursor=cursor, project=resolved_project, view=resolved_view)
     return _tool_result(
         "tasks.list",
         {
@@ -506,14 +553,14 @@ def tasks_search(
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
         resolved_view = resolve_view(container, view)
+        result = container.tasks_service.search(query=query, limit=limit, project=resolved_project, view=resolved_view)
     except ValueError as exc:
         return _failure("tasks.search", "INVALID_ARGS", str(exc), container)
-    result = container.tasks_service.search(query=query, limit=limit, project=resolved_project, view=resolved_view)
     return _tool_result(
         "tasks.search",
         response_formatter.format_search(
@@ -530,7 +577,7 @@ def tasks_search(
 
 
 @mcp_app.tool(name="tasks_done", description="Mark a task as done")
-def tasks_done(task_id: str, project: str | None = None, profile: str | None = None) -> dict[str, Any]:
+def tasks_done(task_id: str, project: str | None = None, profile: str | None = None) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
@@ -540,8 +587,63 @@ def tasks_done(task_id: str, project: str | None = None, profile: str | None = N
     return _tool_result("tasks.done", {"task": result.model_dump()}, container, project=resolved_project)
 
 
+@mcp_app.tool(name="tasks_status", description="Transition a task through its explicit lifecycle")
+def tasks_status(
+    task_id: str,
+    status: str,
+    project: str | None = None,
+    blocked_reason: str | None = None,
+    profile: str | None = None,
+) -> CallToolResult:
+    container = _container(profile)
+    try:
+        if project is None or not project.strip():
+            raise ValueError("tasks status requires project")
+        result = container.tasks_service.set_status(
+            task_id, status=status, project=project, blocked_reason=blocked_reason
+        )
+    except LookupError as exc:
+        return _failure("tasks.status", "NOT_FOUND", str(exc), container)
+    except ValueError as exc:
+        return _failure("tasks.status", "INVALID_ARGS", str(exc), container)
+    return _tool_result("tasks.status", {"task": result.model_dump()}, container, project=project)
+
+
+@mcp_app.tool(name="tasks_upsert", description="Idempotently create or update a task by exact external key")
+def tasks_upsert(
+    external_key: str,
+    title: str,
+    project: str | None = None,
+    body: str = "",
+    source: str = "anchor",
+    source_ref: str = "",
+    priority: int = 0,
+    due_at: str | None = None,
+    task_kind: str = "task",
+    parent_document_id: str | None = None,
+    blocked_by_document_id: str | None = None,
+    metatags: dict[str, object] | None = None,
+    profile: str | None = None,
+) -> CallToolResult:
+    container = _container(profile)
+    try:
+        if project is None or not project.strip():
+            raise ValueError("tasks upsert requires project")
+        result = container.tasks_service.upsert(
+            external_key=external_key, title=title, project=project, body=body,
+            source=source, source_ref=source_ref, priority=priority, due_at=due_at,
+            task_kind=task_kind, parent_document_id=parent_document_id,
+            blocked_by_document_id=blocked_by_document_id, metatags=metatags or {},
+        )
+    except LookupError as exc:
+        return _failure("tasks.upsert", "NOT_FOUND", str(exc), container)
+    except ValueError as exc:
+        return _failure("tasks.upsert", "INVALID_ARGS", str(exc), container)
+    return _tool_result("tasks.upsert", {"task": result.model_dump()}, container, project=project)
+
+
 @mcp_app.tool(name="tasks_delete", description="Soft-delete a task")
-def tasks_delete(task_id: str, project: str | None = None, profile: str | None = None) -> dict[str, Any]:
+def tasks_delete(task_id: str, project: str | None = None, profile: str | None = None) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
@@ -556,7 +658,7 @@ def files_index(
     roots: list[str] | None = None,
     project: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
@@ -564,6 +666,21 @@ def files_index(
     except ValueError as exc:
         return _failure("files.index", "INVALID_ARGS", str(exc), container)
     return _tool_result("files.index", result.model_dump(), container, project=resolved_project)
+
+
+@mcp_app.tool(name="files_reindex", description="Rebuild file chunks and embeddings")
+def files_reindex(
+    roots: list[str] | None = None,
+    project: str | None = None,
+    profile: str | None = None,
+) -> CallToolResult:
+    container = _container(profile)
+    resolved_project = resolve_project(container, project)
+    try:
+        result = container.files_service.reindex(roots=roots, project=resolved_project)
+    except ValueError as exc:
+        return _failure("files.reindex", "INVALID_ARGS", str(exc), container)
+    return _tool_result("files.reindex", result.model_dump(), container, project=resolved_project)
 
 
 @mcp_app.tool(name="files_get", description="Get one indexed file by id or path")
@@ -576,7 +693,7 @@ def files_get(
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
@@ -610,7 +727,7 @@ def files_delete(
     path_prefix: str | None = None,
     project: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
@@ -639,7 +756,7 @@ def files_list(
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
@@ -682,7 +799,7 @@ def files_search(
     project: str | None = None,
     view: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
@@ -719,10 +836,20 @@ def files_search(
 
 
 @mcp_app.tool(name="links_add", description="Create a typed link between two documents")
-def links_add(source_id: str, target_id: str, relation_type: str, profile: str | None = None) -> dict[str, Any]:
+def links_add(
+    source_id: str,
+    target_id: str,
+    relation_type: str,
+    project: str | None = None,
+    profile: str | None = None,
+) -> CallToolResult:
     container = _container(profile)
     try:
-        result = container.links_service.create(source_id=source_id, target_id=target_id, relation_type=relation_type)
+        if project is None or not project.strip():
+            raise ValueError("links add requires project")
+        result = container.links_service.create(project=project, source_id=source_id, target_id=target_id, relation_type=relation_type)
+    except LookupError as exc:
+        return _failure("links.add", "NOT_FOUND", str(exc), container)
     except ValueError as exc:
         return _failure("links.add", "INVALID_ARGS", str(exc), container)
     return _tool_result("links.add", {"link": result.model_dump()}, container)
@@ -732,26 +859,39 @@ def links_add(source_id: str, target_id: str, relation_type: str, profile: str |
 def links_list(
     source_id: str | None = None,
     target_id: str | None = None,
+    project: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
+    if project is None or not project.strip():
+        return _failure("links.list", "INVALID_ARGS", "links list requires project", container)
     if source_id is None and target_id is None:
         return _failure("links.list", "INVALID_ARGS", "links list requires source_id or target_id", container)
     try:
         if source_id is not None:
-            result: DocumentLinkListResult = container.links_service.list_by_source(source_id)
+            result: DocumentLinkListResult = container.links_service.list_by_source(source_id, project=project)
         else:
-            result = container.links_service.list_by_target(target_id or "")
+            result = container.links_service.list_by_target(target_id or "", project=project)
     except ValueError as exc:
         return _failure("links.list", "INVALID_ARGS", str(exc), container)
     return _tool_result("links.list", {"count": result.count, "links": [link.model_dump() for link in result.links]}, container)
 
 
 @mcp_app.tool(name="links_delete", description="Delete a typed link between two documents")
-def links_delete(source_id: str, target_id: str, relation_type: str, profile: str | None = None) -> dict[str, Any]:
+def links_delete(
+    source_id: str,
+    target_id: str,
+    relation_type: str,
+    project: str | None = None,
+    profile: str | None = None,
+) -> CallToolResult:
     container = _container(profile)
     try:
-        deleted = container.links_service.delete(source_id=source_id, target_id=target_id, relation_type=relation_type)
+        if project is None or not project.strip():
+            raise ValueError("links delete requires project")
+        deleted = container.links_service.delete(project=project, source_id=source_id, target_id=target_id, relation_type=relation_type)
+    except LookupError as exc:
+        return _failure("links.delete", "NOT_FOUND", str(exc), container)
     except ValueError as exc:
         return _failure("links.delete", "INVALID_ARGS", str(exc), container)
     return _tool_result("links.delete", {"deleted": deleted}, container)
@@ -770,7 +910,7 @@ def search(
     explain: bool = False,
     profile: str | None = None,
     weights: dict[str, float] | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     resolved_project = resolve_project(container, project)
     try:
@@ -808,7 +948,7 @@ def search(
 
 
 @mcp_app.tool(name="projects_list", description="List all available projects")
-def projects_list(profile: str | None = None) -> dict[str, Any]:
+def projects_list(profile: str | None = None) -> CallToolResult:
     container = _container(profile)
     result: ProjectsListResult = container.projects_service.list_projects()
     return CallToolResult(
@@ -833,7 +973,7 @@ def memory_capture(
     status: MemoryFactStatus = "candidate",
     supersedes_id: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     try:
         result = container.memory_service.capture(
@@ -865,7 +1005,7 @@ def memory_search(
     status: MemoryFactStatus | list[MemoryFactStatus] | None = "active",
     limit: int = 20,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     try:
         result = container.memory_service.search(
@@ -889,7 +1029,7 @@ def memory_extract(
     chat_id: str | None = None,
     limit: int = 20,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     try:
         result = container.memory_service.extract(
@@ -907,7 +1047,7 @@ def memory_extract(
 
 
 @mcp_app.tool(name="memory_flush", description="Flush pending automatic memory extraction batch")
-def memory_flush(project: str | None = None, dry_run: bool = False, profile: str | None = None) -> dict[str, Any]:
+def memory_flush(project: str | None = None, dry_run: bool = False, profile: str | None = None) -> CallToolResult:
     container = _container(profile)
     try:
         resolved_project = resolve_project(container, project)
@@ -933,7 +1073,7 @@ def memory_recall(
     chat_id: str | None = None,
     limit: int = 5,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     try:
         result = container.memory_service.recall(
@@ -955,7 +1095,7 @@ def memory_context(
     limit: int = 5,
     budget_tokens: int | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     try:
         result = container.memory_service.build_context(
@@ -974,13 +1114,18 @@ def memory_context(
 def memory_promote(
     fact_id: str,
     scope: MemoryScope,
+    source_project: str | None = None,
     project: str | None = None,
     chat_id: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     try:
-        result = container.memory_service.promote(fact_id, scope=scope, project=project, chat_id=chat_id)
+        if source_project is None or not source_project.strip():
+            raise ValueError("memory promote requires source_project")
+        result = container.memory_service.promote(
+            fact_id, scope=scope, source_project=source_project, project=project, chat_id=chat_id
+        )
     except LookupError as exc:
         return _failure("memory.promote", "NOT_FOUND", str(exc), container)
     except ValueError as exc:
@@ -993,7 +1138,7 @@ def memory_evidence(
     fact_id: str,
     project: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     try:
         result = container.memory_service.evidence(fact_id, project=resolve_project(container, project))
@@ -1008,11 +1153,14 @@ def memory_evidence(
 def memory_status(
     fact_id: str,
     status: MemoryFactStatus,
+    project: str | None = None,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     try:
-        result = container.memory_service.update_status(fact_id, status)
+        if project is None or not project.strip():
+            raise ValueError("memory status requires project")
+        result = container.memory_service.update_status(fact_id, status, project=project)
     except LookupError as exc:
         return _failure("memory.status", "NOT_FOUND", str(exc), container)
     except ValueError as exc:
@@ -1026,7 +1174,7 @@ def memory_scenarios(
     project: str | None = None,
     limit: int = 5,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     try:
         result = container.memory_service.search_scenarios(
@@ -1045,7 +1193,7 @@ def memory_conflicts(
     chat_id: str | None = None,
     limit: int = 20,
     profile: str | None = None,
-) -> dict[str, Any]:
+) -> CallToolResult:
     container = _container(profile)
     try:
         result = container.memory_service.conflicts(
@@ -1059,7 +1207,7 @@ def memory_conflicts(
 
 
 @mcp_app.tool(name="memory_metrics", description="Read memory quality and extraction metrics")
-def memory_metrics(project: str | None = None, profile: str | None = None) -> dict[str, Any]:
+def memory_metrics(project: str | None = None, profile: str | None = None) -> CallToolResult:
     container = _container(profile)
     try:
         result = container.memory_service.metrics(project=resolve_project(container, project))

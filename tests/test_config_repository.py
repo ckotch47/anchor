@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
+import stat
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from anchor.adapters.filesystem_config_repository import FileSystemConfigRepository
@@ -30,9 +32,30 @@ class ConfigRepositoryTest(unittest.TestCase):
 
             service.set(section="runtime", key="default_view", value="full")
             result = service.get()
+            mode = stat.S_IMODE(config_path.stat().st_mode)
 
         self.assertEqual(result.config.runtime.default_view, "full")
         self.assertEqual(result.config_path, str(config_path))
+        self.assertEqual(mode, 0o600)
+
+    def test_config_load_rejects_symlink_and_insecure_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            external = root / "external.toml"
+            external.write_text("[runtime]\ndefault_project = \"attacker\"\n", encoding="utf-8")
+            external.chmod(0o600)
+            symlink = root / "symlink.toml"
+            symlink.symlink_to(external)
+
+            with self.assertRaises((OSError, ValueError)):
+                FileSystemConfigRepository(config_path=symlink).load_raw()
+
+            insecure = root / "insecure.toml"
+            insecure.write_text("[runtime]\ndefault_project = \"attacker\"\n", encoding="utf-8")
+            insecure.chmod(0o644)
+            with self.assertRaises(ValueError):
+                FileSystemConfigRepository(config_path=insecure).load_raw()
+            self.assertEqual(stat.S_IMODE(insecure.stat().st_mode), 0o644)
 
     def test_init_from_example_creates_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -82,7 +105,7 @@ class ConfigRepositoryTest(unittest.TestCase):
             repo = SqliteMigrationRepository(database_path=db_path)
             result = repo.apply_pending()
 
-            with sqlite3.connect(db_path) as connection:
+            with closing(sqlite3.connect(db_path)) as connection:
                 tables = {
                     row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
                 }
@@ -93,8 +116,8 @@ class ConfigRepositoryTest(unittest.TestCase):
                 task_columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)").fetchall()}
                 document_columns = {row[1] for row in connection.execute("PRAGMA table_info(documents)").fetchall()}
 
-            self.assertEqual(result.applied, 10)
-        self.assertEqual(result.current_version, 10)
+            self.assertEqual(result.applied, 13)
+        self.assertEqual(result.current_version, 13)
         self.assertIn("schema_migrations", tables)
         self.assertIn("documents", tables)
         self.assertIn("notes", tables)
@@ -122,5 +145,6 @@ class ConfigRepositoryTest(unittest.TestCase):
         self.assertIn("started_at", task_columns)
         self.assertIn("parent_document_id", task_columns)
         self.assertIn("blocked_by_document_id", task_columns)
+        self.assertIn("external_key", task_columns)
         self.assertIn("correlation_id", document_columns)
-        self.assertEqual(version_rows, [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,)])
+        self.assertEqual(version_rows, [(version,) for version in range(1, 14)])

@@ -24,7 +24,13 @@
 ## Needs more design
 
 - Exact default values for per-command limits and budgets.
-- Packaging/distribution choice.
+
+## Already decided for packaging
+
+- Build both a wheel and a source distribution from the locked Python project.
+- The wheel contains the executable package and bundled runtime config template.
+- The source distribution additionally carries the optional reranker Compose profile and its operator guide.
+- CI must install and smoke-test the wheel and verify the source-distribution assets.
 
 ## Already decided for response shapes
 

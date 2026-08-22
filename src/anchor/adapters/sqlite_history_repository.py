@@ -509,7 +509,7 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
                     """,
                     (json.dumps(query_embedding, separators=(",", ":")), "history", project, limit),
                 ).fetchall()
-                candidates = [
+                vector_candidates = [
                     HistorySearchCandidate(
                         history=self._row_to_search_item(row),
                         chunk_id=str(row["chunk_id"]),
@@ -519,14 +519,14 @@ class SqliteHistoryRepository(SqliteRepositoryBase):
                     )
                     for row in rows
                 ]
-                candidates.sort(
+                vector_candidates.sort(
                     key=lambda item: combine_search_scores(
                         lexical_score=item.lexical_score,
                         vector_score=item.vector_score,
                     ),
                     reverse=True,
                 )
-                return candidates[:limit]
+                return vector_candidates[:limit]
             if not vector_extension_loaded:
                 require_vector_extension_for_large_python_fallback(connection, project=project)
             rows = connection.execute(

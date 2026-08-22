@@ -16,9 +16,11 @@ from anchor.application.history.models import (
     HistorySearchHit,
     HistorySearchResult,
 )
+from anchor.application.provider_security import safe_provider_error
 from anchor.application.retrieval.compact_items import compact_history_item
 from anchor.application.retrieval.document_chunking import DocumentChunkingService, count_tokens
 from anchor.application.retrieval.rerank_service import RerankService
+from anchor.application.retrieval.search_query import MAX_RETRIEVAL_LIMIT, validate_retrieval_limit
 from anchor.application.retrieval.search_scoring import combine_search_scores
 from anchor.application.system.metadata_service import MetadataSchemaService
 
@@ -67,15 +69,22 @@ class HistoryService:
         self._memory_extract_min_interval_seconds = min_interval_seconds
 
     def _maybe_extract_memory(self, project: str) -> None:
-        if not self._memory_auto_extract or self._memory_extractor is None:
+        extractor = self._memory_extractor
+        if not self._memory_auto_extract or extractor is None:
             return
         now = monotonic()
         state = self._repository.get_batch_state(project=project, chat_id=None) or {}
-        pending_count = int(state.get("pending_count") or 0) + 1
+        raw_pending_count = state.get("pending_count")
+        pending_count = raw_pending_count if isinstance(raw_pending_count, int) else 0
+        pending_count += 1
         pending_since = state.get("pending_since")
-        pending_since = float(pending_since) if pending_since is not None else now
+        pending_since = float(pending_since) if isinstance(pending_since, (int, float)) else now
         last_extraction_at = state.get("last_extraction_at")
-        last_extraction_at = float(last_extraction_at) if last_extraction_at is not None else None
+        last_extraction_at = (
+            float(last_extraction_at)
+            if isinstance(last_extraction_at, (int, float))
+            else None
+        )
         self._repository.save_batch_state(
             project=project,
             chat_id=None,
@@ -107,9 +116,12 @@ class HistoryService:
             last_extraction_at=now,
         )
         try:
-            result = self._memory_extractor(project=project, limit=pending_count)
+            extractor = self._memory_extractor
+            if extractor is None:
+                return None
+            result = extractor(project=project, limit=pending_count)
         except Exception:
-            logger.warning("automatic memory extraction failed after history append", exc_info=True)
+            logger.warning("automatic memory extraction failed after history append")
             return None
         self._repository.save_batch_state(
             project=project,
@@ -125,12 +137,13 @@ class HistoryService:
             return None
         resolved_project = project or self._project
         state = self._repository.get_batch_state(project=resolved_project, chat_id=None) or {}
-        pending_count = int(state.get("pending_count") or 0)
+        raw_pending_count = state.get("pending_count")
+        pending_count = raw_pending_count if isinstance(raw_pending_count, int) else 0
         if pending_count <= 0:
             return None
         now = monotonic()
         pending_since = state.get("pending_since")
-        pending_since = float(pending_since) if pending_since is not None else now
+        pending_since = float(pending_since) if isinstance(pending_since, (int, float)) else now
         return self._run_memory_extraction(resolved_project, pending_count, pending_since, now)
 
     def append(
@@ -227,12 +240,11 @@ class HistoryService:
         query_embedding: list[float] | None = None,
     ) -> HistorySearchResult:
         self._require_non_empty(query, "query")
-        if limit <= 0:
-            raise ValueError("limit must be greater than zero")
+        limit = validate_retrieval_limit(limit)
         resolved_project = project or self._project
         if not prefer_lexical_only:
             self._drain_pending_embeddings(resolved_project)
-        candidate_limit = max(limit * 4, limit)
+        candidate_limit = min(max(limit * 4, limit), MAX_RETRIEVAL_LIMIT)
         candidates = self._collect_candidates(
             query,
             candidate_limit,
@@ -307,6 +319,7 @@ class HistoryService:
                 result = self._embedding_service.embed_chunks(
                     [chunk.id for chunk in chunks],
                     [chunk.chunk_text for chunk in chunks],
+                    project=project,
                 )
                 self._repository.store_chunk_embeddings(
                     result.embeddings,
@@ -318,7 +331,10 @@ class HistoryService:
                     self._repository.mark_embedding_index_ready(document_id)
             except Exception as exc:
                 if hasattr(self._repository, "mark_embedding_index_error"):
-                    self._repository.mark_embedding_index_error(document_id, last_error=str(exc))
+                    self._repository.mark_embedding_index_error(
+                        document_id,
+                        last_error=safe_provider_error("embeddings", exc),
+                    )
 
     def _collect_candidates(
         self,
@@ -334,7 +350,9 @@ class HistoryService:
         resolved_query_embedding = query_embedding
         if resolved_query_embedding is None and self._embedding_service is not None and not prefer_lexical_only:
             try:
-                resolved_query_embedding = self._embedding_service.embed_texts([query]).embeddings[0].embedding
+                resolved_query_embedding = self._embedding_service.embed_texts(
+                    [query], projects=[project]
+                ).embeddings[0].embedding
             except Exception:
                 resolved_query_embedding = None
         if resolved_query_embedding is not None and not prefer_lexical_only:
@@ -355,14 +373,29 @@ class HistoryService:
             if candidate.snippet and len(candidate.snippet) > len(current.snippet):
                 current.snippet = candidate.snippet
             current.token_count = max(current.token_count, candidate.token_count)
-        return list(merged.values())
+        return sorted(
+            merged.values(),
+            key=lambda candidate: combine_search_scores(
+                lexical_score=candidate.lexical_score,
+                vector_score=candidate.vector_score,
+                rerank_score=None,
+            ),
+            reverse=True,
+        )[:limit]
 
     def _rerank_candidates(self, query: str, candidates: list[HistorySearchCandidate]) -> list[HistorySearchCandidate]:
         if not candidates:
             return []
         if self._rerank_service is None:
             return candidates
-        rerank_scores = self._rerank_service.rerank(query, [candidate.snippet for candidate in candidates])
+        try:
+            rerank_scores = self._rerank_service.rerank(
+                query,
+                [candidate.snippet for candidate in candidates],
+                project=candidates[0].history.project,
+            )
+        except Exception:
+            return candidates
         for candidate, rerank_score in zip(candidates, rerank_scores, strict=True):
             candidate.rerank_score = rerank_score
         return candidates

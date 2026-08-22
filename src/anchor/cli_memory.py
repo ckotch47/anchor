@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import typer
 
+from anchor.application.memory.models import MemoryFactStatus, MemoryScope, MemoryScopeFilter
 from anchor.cli_shared import resolve_project, response_formatter
 from anchor.container import build_container
 
@@ -91,12 +92,12 @@ def memory_capture(
         result = container.memory_service.capture(
             content=content,
             fact_type=fact_type,
-            scope=scope,
+            scope=cast(MemoryScope, scope),
             project=resolve_project(container, project),
             chat_id=chat_id,
             confidence=confidence,
             evidence_refs=_parse_evidence_refs(evidence_refs),
-            status=status,
+            status=cast(MemoryFactStatus, status),
             supersedes_id=supersedes_id,
         )
         typer.echo(json.dumps(response_formatter.format_success(command, {"fact": result.model_dump()}, container), ensure_ascii=False, indent=2))
@@ -127,12 +128,12 @@ def memory_search(
         container = build_container(profile=profile)
         result = container.memory_service.search(
             query=query,
-            scope=scope,
+            scope=cast(MemoryScopeFilter, scope),
             project=resolve_project(container, project) if project else None,
             projects=projects,
             chat_id=chat_id,
             fact_type=fact_type,
-            status=status,
+            status=cast(list[MemoryFactStatus] | None, status),
             limit=limit,
         )
         typer.echo(json.dumps(response_formatter.format_success(command, result.model_dump(), container), ensure_ascii=False, indent=2))
@@ -196,14 +197,23 @@ def memory_context(
 def memory_promote(
     fact_id: Annotated[str, typer.Option("--id")],
     scope: Annotated[str, typer.Option("--scope")],
+    source_project: Annotated[str | None, typer.Option("--source-project")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     chat_id: Annotated[str | None, typer.Option("--chat-id")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
     command = "memory.promote"
     try:
+        if source_project is None or not source_project.strip():
+            raise ValueError("memory promote requires --source-project")
         container = build_container(profile=profile)
-        result = container.memory_service.promote(fact_id, scope=scope, project=project, chat_id=chat_id)
+        result = container.memory_service.promote(
+            fact_id,
+            scope=cast(MemoryScope, scope),
+            source_project=source_project,
+            project=project,
+            chat_id=chat_id,
+        )
         typer.echo(json.dumps(response_formatter.format_success(command, {"fact": result.model_dump()}, container), ensure_ascii=False, indent=2))
     except LookupError as exc:
         response_formatter.emit_error(command, "NOT_FOUND", str(exc))
@@ -296,12 +306,19 @@ def memory_evidence(
 def memory_status(
     fact_id: Annotated[str, typer.Option("--id")],
     status: Annotated[str, typer.Option("--status")],
+    project: Annotated[str | None, typer.Option("--project")] = None,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
 ) -> None:
     command = "memory.status"
     try:
+        if project is None or not project.strip():
+            raise ValueError("memory status requires --project")
         container = build_container(profile=profile)
-        result = container.memory_service.update_status(fact_id, status)
+        result = container.memory_service.update_status(
+            fact_id,
+            cast(MemoryFactStatus, status),
+            project=project,
+        )
         typer.echo(json.dumps(response_formatter.format_success(command, {"fact": result.model_dump()}, container), ensure_ascii=False, indent=2))
     except LookupError as exc:
         response_formatter.emit_error(command, "NOT_FOUND", str(exc))

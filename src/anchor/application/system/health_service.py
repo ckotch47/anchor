@@ -1,27 +1,28 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from anchor.application.system.ports import MaintenancePort
+from anchor.application.system.ports import HealthSnapshotPort
 from anchor.config import AppConfig
 
 
 class HealthResult(BaseModel):
     status: str = "ok"
+    ready: bool = True
     storage: str = "sqlite"
     mode: str = "offline-only"
+    checks: dict[str, str] = Field(default_factory=dict)
+    index_error_count: int = 0
+    pending_migrations: list[int] = Field(default_factory=list)
+    unexpected_migrations: list[int] = Field(default_factory=list)
 
 
 class HealthService:
-    def __init__(self, config: AppConfig, maintenance_port: MaintenancePort | None = None) -> None:
+    def __init__(self, config: AppConfig, snapshot_port: HealthSnapshotPort) -> None:
         self._config = config
-        self._maintenance_port = maintenance_port
+        self._snapshot_port = snapshot_port
 
     def health(self) -> HealthResult:
-        if self._maintenance_port is not None:
-            try:
-                self._maintenance_port.auto_maintain_if_due()
-            except Exception:
-                pass
         mode = "offline-only" if self._config.runtime.offline_only else "online-enabled"
-        return HealthResult(mode=mode)
+        snapshot = self._snapshot_port.snapshot()
+        return HealthResult.model_validate({"mode": mode, **snapshot})

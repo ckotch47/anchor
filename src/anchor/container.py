@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from anchor.adapters.filesystem_config_repository import FileSystemConfigRepository
+from anchor.adapters.sqlite_events_repository import SqliteProviderEgressAuditRepository
 from anchor.adapters.sqlite_files_repository import SqliteFilesRepository
+from anchor.adapters.sqlite_health_repository import SqliteHealthRepository
 from anchor.adapters.sqlite_history_repository import SqliteHistoryRepository
 from anchor.adapters.sqlite_links_repository import SqliteLinksRepository
 from anchor.adapters.sqlite_maintenance_repository import SqliteMaintenanceRepository
@@ -21,8 +23,9 @@ from anchor.application.links.service import DocumentLinksService
 from anchor.application.memory.provider_service import OpenAICompatibleMemoryExtractionProvider
 from anchor.application.memory.service import MemoryService
 from anchor.application.notes.service import NotesService
+from anchor.application.provider_security import ProviderEgressPolicy
 from anchor.application.retrieval.document_chunking import DocumentChunkingService
-from anchor.application.retrieval.rerank_provider_service import OpenAICompatibleRerankProvider
+from anchor.application.retrieval.rerank_provider_service import NativeRerankProvider, OpenAICompatibleRerankProvider
 from anchor.application.retrieval.rerank_service import RerankService
 from anchor.application.retrieval.search_service import SearchService
 from anchor.application.system.config_service import ConfigService
@@ -32,7 +35,7 @@ from anchor.application.system.metadata_service import MetadataSchemaService
 from anchor.application.system.migration_service import MigrationService
 from anchor.application.system.projects_service import ProjectsService
 from anchor.application.tasks.service import TasksService
-from anchor.config import AppConfig, default_database_path
+from anchor.config import AppConfig, default_data_dir, default_database_path, ensure_private_default_data_dir
 
 
 @dataclass(frozen=True)
@@ -55,13 +58,19 @@ class Container:
 
 
 def build_container(profile: str | None = None, auto_migrate: bool = True) -> Container:
+    database_path = default_database_path()
+    if auto_migrate and database_path.parent == default_data_dir():
+        ensure_private_default_data_dir()
     repo = FileSystemConfigRepository()
     config, config_path, profile_name = repo.load(profile=profile)
     config_service = ConfigService(repository=repo)
-    database_path = default_database_path()
+    provider_audit = SqliteProviderEgressAuditRepository(database_path=database_path)
     maintenance_service = MaintenanceService(repository=SqliteMaintenanceRepository(database_path=database_path))
     migration_service = MigrationService(repository=SqliteMigrationRepository(database_path=database_path))
-    health_service = HealthService(config=config, maintenance_port=maintenance_service)
+    health_service = HealthService(
+        config=config,
+        snapshot_port=SqliteHealthRepository(database_path=database_path),
+    )
     links_service = DocumentLinksService(
         repository=SqliteLinksRepository(database_path=database_path),
         config=config.links,
@@ -79,15 +88,40 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
             embedding_service = EmbeddingService(
                 provider=embeddings_provider,
                 model=embedding_model,
+                max_batch_items=config.provider.max_batch_items,
+                max_batch_characters=config.provider.max_batch_characters,
+                egress_policy=ProviderEgressPolicy(
+                    endpoint=embeddings_provider.endpoint,
+                    external_send_allowed=config.runtime.embedding_external_send,
+                    external_projects=tuple(config.runtime.embedding_external_projects),
+                ),
+                audit_port=provider_audit,
             )
         if rerank_model:
-            rerank_provider = OpenAICompatibleRerankProvider(
-                base_url=config.provider.base_url,
-                api_key_env=config.provider.api_key_env,
+            rerank_provider = (
+                NativeRerankProvider(
+                    base_url=config.provider.rerank_base_url,
+                    api_key_env=config.provider.rerank_api_key_env,
+                    max_response_bytes=config.provider.rerank_max_response_bytes,
+                )
+                if config.provider.rerank_base_url.strip()
+                else OpenAICompatibleRerankProvider(
+                    base_url=config.provider.base_url,
+                    api_key_env=config.provider.api_key_env,
+                    max_response_bytes=config.provider.rerank_max_response_bytes,
+                )
             )
             rerank_service = RerankService(
                 provider=rerank_provider,
                 model=rerank_model,
+                max_batch_items=config.provider.max_batch_items,
+                max_batch_characters=config.provider.max_batch_characters,
+                egress_policy=ProviderEgressPolicy(
+                    endpoint=rerank_provider.endpoint,
+                    external_send_allowed=config.runtime.rerank_external_send,
+                    external_projects=tuple(config.runtime.rerank_external_projects),
+                ),
+                audit_port=provider_audit,
             )
     metadata_service = MetadataSchemaService(config.metadata)
     notes_service = NotesService(
@@ -153,6 +187,8 @@ def build_container(profile: str | None = None, auto_migrate: bool = True) -> Co
             model=config.provider.memory_model,
             external_send_allowed=config.runtime.memory_external_send,
             external_projects=config.runtime.memory_external_projects,
+            provider_name=config.provider.base_url,
+            max_extracted_facts=config.runtime.memory_extract_max_facts,
         )
     history_service.configure_memory_extraction(
         memory_service.extract,

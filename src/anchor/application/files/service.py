@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import base64
+import builtins
 import fnmatch
 import hashlib
 import json
+import os
+import stat as stat_module
 from collections import OrderedDict
 from pathlib import Path
 from time import monotonic
@@ -14,16 +17,20 @@ from anchor.application.embeddings.service import EmbeddingService
 from anchor.application.files.chunking import FileChunkingService
 from anchor.application.files.models import (
     FileIndexDraft,
+    FileListItem,
     FileSearchCandidate,
     FileSearchHit,
     FilesGetResult,
     FilesIndexResult,
     FilesListResult,
     FilesSearchResult,
+    IndexedFileRecord,
 )
+from anchor.application.provider_security import safe_provider_error
 from anchor.application.retrieval.compact_items import compact_file_item
 from anchor.application.retrieval.document_chunking import count_tokens
 from anchor.application.retrieval.rerank_service import RerankService
+from anchor.application.retrieval.search_query import MAX_RETRIEVAL_LIMIT, validate_retrieval_limit
 from anchor.application.retrieval.search_scoring import combine_search_scores
 from anchor.application.system.metadata_service import MetadataSchemaService
 
@@ -68,8 +75,8 @@ class FilesService:
         embedding_service: EmbeddingService | None = None,
         rerank_service: RerankService | None = None,
         metadata_service: MetadataSchemaService | None = None,
-        roots: list[str] | None = None,
-        ignore_patterns: list[str] | None = None,
+        roots: builtins.list[str] | None = None,
+        ignore_patterns: builtins.list[str] | None = None,
         max_file_size: int = 1_000_000,
         chunk_size: int = 400,
         chunk_overlap: int = 50,
@@ -88,34 +95,31 @@ class FilesService:
         self._chunk_overlap = chunk_overlap
         self._budget_tokens = budget_tokens
 
-    def index(self, roots: list[str] | None = None, *, project: str | None = None) -> FilesIndexResult:
+    def index(
+        self,
+        roots: builtins.list[str] | None = None,
+        *,
+        project: str | None = None,
+        force: bool = False,
+    ) -> FilesIndexResult:
         resolved_project = project or self._project
-        resolved_roots = [Path(root).expanduser().resolve() for root in (roots or self._roots or [Path.cwd()])]
+        resolved_roots = self._resolve_roots(roots, resolved_project)
         indexed = 0
         skipped = 0
         deleted = 0
         seen_paths: set[str] = set()
-        batch: list[FileIndexDraft] = []
+        batch: builtins.list[FileIndexDraft] = []
         for root in resolved_roots:
             if not root.exists() or not root.is_dir():
                 continue
-            gitignore_cache: dict[Path, list[str]] = {}
+            gitignore_cache: dict[Path, builtins.list[str]] = {}
             for file_path in self._walk_files(root):
                 if self._should_ignore(file_path, root, gitignore_cache):
                     skipped += 1
                     continue
-                if not file_path.is_file():
-                    continue
-                stat = file_path.stat()
-                if stat.st_size > self._max_file_size:
-                    skipped += 1
-                    continue
-                if self._is_binary(file_path):
-                    skipped += 1
-                    continue
                 try:
-                    raw_text = file_path.read_text(encoding="utf-8")
-                except UnicodeDecodeError:
+                    raw_text, file_stat = self._read_rooted_regular_file(root, file_path)
+                except (OSError, UnicodeDecodeError, ValueError):
                     skipped += 1
                     continue
                 relative_path = file_path.as_posix()
@@ -123,10 +127,12 @@ class FilesService:
                 content_hash = self._hash_text(raw_text)
                 existing = self._repository.get_by_path(project=resolved_project, path=relative_path)
                 if (
+                    not force
+                    and
                     existing is not None
                     and existing.content_hash == content_hash
-                    and existing.file_size == stat.st_size
-                    and existing.mtime_ns == stat.st_mtime_ns
+                    and existing.file_size == file_stat.st_size
+                    and existing.mtime_ns == file_stat.st_mtime_ns
                 ):
                     continue
                 language = self._detect_language(file_path)
@@ -146,9 +152,9 @@ class FilesService:
                         root_path=root.as_posix(),
                         language=language,
                         metatags={},
-                        file_size=stat.st_size,
+                        file_size=file_stat.st_size,
                         content_hash=content_hash,
-                        mtime_ns=stat.st_mtime_ns,
+                        mtime_ns=file_stat.st_mtime_ns,
                         chunks=chunks,
                     )
                 )
@@ -168,6 +174,25 @@ class FilesService:
             self._drain_pending_embeddings(resolved_project, limit=1, time_budget_seconds=0.1)
         return FilesIndexResult(count=indexed + deleted, indexed=indexed, skipped=skipped, deleted=deleted)
 
+    def reindex(self, roots: builtins.list[str] | None = None, *, project: str | None = None) -> FilesIndexResult:
+        """Rebuild the derived file index, including chunks and embeddings."""
+        resolved_project = project or self._project
+        result = self.index(roots=roots, project=resolved_project, force=True)
+        if self._embedding_service is not None and hasattr(self._repository, "pending_embedding_documents"):
+            while self._repository.pending_embedding_documents(project=resolved_project, limit=1):
+                self._drain_pending_embeddings(resolved_project, limit=32)
+        return result
+
+    def _resolve_roots(self, roots: builtins.list[str] | None, project: str) -> builtins.list[Path]:
+        configured_roots = roots or self._roots
+        if configured_roots:
+            return [Path(root).expanduser().resolve() for root in configured_roots]
+        if hasattr(self._repository, "list_indexed_root_paths"):
+            indexed_roots = self._repository.list_indexed_root_paths(project=project)
+            if indexed_roots:
+                return [Path(root).expanduser().resolve() for root in indexed_roots]
+        return [Path.cwd()]
+
     def list(
         self,
         limit: int = 20,
@@ -179,8 +204,7 @@ class FilesService:
         language: str | None = None,
         path_prefix: str | None = None,
     ) -> FilesListResult:
-        if limit <= 0:
-            raise ValueError("limit must be greater than zero")
+        limit = validate_retrieval_limit(limit)
         resolved_project = project or self._project
         resolved_root = self._normalize_root(root)
         resolved_language = self._normalize_language(language)
@@ -199,9 +223,14 @@ class FilesService:
         if len(files) > limit:
             next_cursor = self._encode_cursor(files[limit - 1].id)
             files = files[:limit]
+        projected_files: builtins.list[IndexedFileRecord | FileListItem] = []
+        if view == "full":
+            projected_files.extend(files)
+        else:
+            projected_files.extend(compact_file_item(file) for file in files)
         return FilesListResult(
             count=len(files),
-            files=files if view == "full" else [compact_file_item(file) for file in files],
+            files=projected_files,
             next_cursor=next_cursor,
         )
 
@@ -287,18 +316,17 @@ class FilesService:
         language: str | None = None,
         path_prefix: str | None = None,
         prefer_lexical_only: bool = False,
-        query_embedding: list[float] | None = None,
+        query_embedding: builtins.list[float] | None = None,
     ) -> FilesSearchResult:
         self._require_non_empty(query, "query")
-        if limit <= 0:
-            raise ValueError("limit must be greater than zero")
+        limit = validate_retrieval_limit(limit)
         resolved_project = project or self._project
         resolved_root = self._normalize_root(root)
         resolved_language = self._normalize_language(language)
         resolved_path_prefix = self._normalize_path_prefix(path_prefix, resolved_root)
         if not prefer_lexical_only:
             self._drain_pending_embeddings(resolved_project)
-        candidate_limit = max(limit * 4, limit)
+        candidate_limit = min(max(limit * 4, limit), MAX_RETRIEVAL_LIMIT)
         candidates = self._collect_candidates(
             query,
             candidate_limit,
@@ -309,15 +337,19 @@ class FilesService:
             prefer_lexical_only=prefer_lexical_only,
             query_embedding=query_embedding,
         )
-        reranked_candidates = self._rerank_candidates(query, candidates) if not prefer_lexical_only else candidates
+        reranked_candidates = (
+            self._rerank_candidates(query, candidates, project=resolved_project)
+            if not prefer_lexical_only
+            else candidates
+        )
         deduplicated = self._deduplicate_by_file(reranked_candidates)
         trimmed = self._trim_to_budget(
             deduplicated,
             budget_tokens if budget_tokens is not None else self._budget_tokens,
         )
-        results: list[FileSearchHit] = []
+        results: builtins.list[FileSearchHit] = []
         for candidate in trimmed[:limit]:
-            file_item = candidate.file
+            file_item: IndexedFileRecord | FileListItem = candidate.file
             if view == "full":
                 file_item = self._repository.get(candidate.file.id, project=resolved_project) or candidate.file
             results.append(
@@ -360,7 +392,7 @@ class FilesService:
         except Exception:
             return
 
-    def _flush_index_batch(self, batch: list[FileIndexDraft]) -> None:
+    def _flush_index_batch(self, batch: builtins.list[FileIndexDraft]) -> None:
         if not batch:
             return
         for draft in batch:
@@ -395,6 +427,7 @@ class FilesService:
                 result = self._embedding_service.embed_chunks(
                     [chunk.id for chunk in chunks],
                     [chunk.chunk_text for chunk in chunks],
+                    project=project,
                 )
                 self._repository.store_chunk_embeddings(
                     result.embeddings,
@@ -406,7 +439,10 @@ class FilesService:
                     self._repository.mark_embedding_index_ready(document_id)
             except Exception as exc:
                 if hasattr(self._repository, "mark_embedding_index_error"):
-                    self._repository.mark_embedding_index_error(document_id, last_error=str(exc))
+                    self._repository.mark_embedding_index_error(
+                        document_id,
+                        last_error=safe_provider_error("embeddings", exc),
+                    )
 
     def _collect_candidates(
         self,
@@ -418,8 +454,8 @@ class FilesService:
         language: str | None = None,
         path_prefix: str | None = None,
         prefer_lexical_only: bool = False,
-        query_embedding: list[float] | None = None,
-    ) -> list[FileSearchCandidate]:
+        query_embedding: builtins.list[float] | None = None,
+    ) -> builtins.list[FileSearchCandidate]:
         lexical_rows = self._repository.search_lexical_candidates(
             query=query,
             limit=limit,
@@ -428,11 +464,13 @@ class FilesService:
             language=language,
             path_prefix=path_prefix,
         )
-        semantic_rows: list[FileSearchCandidate] = []
+        semantic_rows: builtins.list[FileSearchCandidate] = []
         resolved_query_embedding = query_embedding
         if resolved_query_embedding is None and self._embedding_service is not None and not prefer_lexical_only:
             try:
-                resolved_query_embedding = self._embedding_service.embed_texts([query]).embeddings[0].embedding
+                resolved_query_embedding = self._embedding_service.embed_texts(
+                    [query], projects=[project]
+                ).embeddings[0].embedding
             except Exception:
                 resolved_query_embedding = None
         if resolved_query_embedding is not None and not prefer_lexical_only:
@@ -460,7 +498,7 @@ class FilesService:
             if candidate.snippet and len(candidate.snippet) > len(current.snippet):
                 current.snippet = candidate.snippet
             current.token_count = max(current.token_count, candidate.token_count)
-        return [
+        filtered = [
             candidate
             for candidate in merged.values()
             if self._file_matches_filters(
@@ -470,18 +508,40 @@ class FilesService:
                 path_prefix=path_prefix,
             )
         ]
+        return sorted(
+            filtered,
+            key=lambda candidate: combine_search_scores(
+                lexical_score=candidate.lexical_score,
+                vector_score=candidate.vector_score,
+                rerank_score=None,
+            ),
+            reverse=True,
+        )[:limit]
 
-    def _rerank_candidates(self, query: str, candidates: list[FileSearchCandidate]) -> list[FileSearchCandidate]:
+    def _rerank_candidates(
+        self,
+        query: str,
+        candidates: builtins.list[FileSearchCandidate],
+        *,
+        project: str,
+    ) -> builtins.list[FileSearchCandidate]:
         if not candidates:
             return []
         if self._rerank_service is None:
             return candidates
-        rerank_scores = self._rerank_service.rerank(query, [candidate.snippet for candidate in candidates])
+        try:
+            rerank_scores = self._rerank_service.rerank(
+                query,
+                [candidate.snippet for candidate in candidates],
+                project=project,
+            )
+        except Exception:
+            return candidates
         for candidate, rerank_score in zip(candidates, rerank_scores, strict=True):
             candidate.rerank_score = rerank_score
         return candidates
 
-    def _deduplicate_by_file(self, candidates: list[FileSearchCandidate]) -> list[FileSearchCandidate]:
+    def _deduplicate_by_file(self, candidates: builtins.list[FileSearchCandidate]) -> builtins.list[FileSearchCandidate]:
         best_by_file: OrderedDict[str, FileSearchCandidate] = OrderedDict()
         for candidate in candidates:
             key = candidate.file.id
@@ -509,7 +569,48 @@ class FilesService:
                 continue
             yield current
 
-    def _should_ignore(self, path: Path, root: Path, gitignore_cache: dict[Path, list[str]]) -> bool:
+    def _read_rooted_regular_file(self, root: Path, path: Path) -> tuple[str, os.stat_result]:
+        relative = path.relative_to(root)
+        if not relative.parts:
+            raise ValueError("file path must be below the configured root")
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        root_fd = os.open(root, directory_flags | nofollow)
+        opened_fds = [root_fd]
+        try:
+            directory_fd = root_fd
+            for component in relative.parts[:-1]:
+                next_fd = os.open(component, directory_flags | nofollow, dir_fd=directory_fd)
+                opened_fds.append(next_fd)
+                directory_fd = next_fd
+            file_fd = os.open(
+                relative.parts[-1],
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0) | nofollow,
+                dir_fd=directory_fd,
+            )
+            opened_fds.append(file_fd)
+            metadata = os.fstat(file_fd)
+            if not stat_module.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                raise ValueError("indexed path must be a regular, single-link file")
+            if metadata.st_size > self._max_file_size:
+                raise ValueError("indexed file exceeds configured size limit")
+            chunks: builtins.list[bytes] = []
+            remaining = self._max_file_size + 1
+            while remaining > 0:
+                chunk = os.read(file_fd, min(65_536, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            raw = b"".join(chunks)
+            if len(raw) > self._max_file_size or b"\x00" in raw[:4096]:
+                raise ValueError("indexed file is oversized or binary")
+            return raw.decode("utf-8"), metadata
+        finally:
+            for descriptor in reversed(opened_fds):
+                os.close(descriptor)
+
+    def _should_ignore(self, path: Path, root: Path, gitignore_cache: dict[Path, builtins.list[str]]) -> bool:
         relative_path = path.relative_to(root).as_posix()
         candidate_dirs = [root, *path.parents]
         patterns = list(self._ignore_patterns)
@@ -518,14 +619,16 @@ class FilesService:
                 break
             if directory.is_dir() and directory not in gitignore_cache:
                 gitignore_path = directory / ".gitignore"
-                if gitignore_path.exists():
+                try:
+                    gitignore_text, _ = self._read_rooted_regular_file(root, gitignore_path)
+                except (OSError, UnicodeDecodeError, ValueError):
+                    gitignore_cache[directory] = []
+                else:
                     gitignore_cache[directory] = [
                         line.strip()
-                        for line in gitignore_path.read_text(encoding="utf-8").splitlines()
+                        for line in gitignore_text.splitlines()
                         if line.strip() and not line.lstrip().startswith("#")
                     ]
-                else:
-                    gitignore_cache[directory] = []
             patterns.extend(gitignore_cache.get(directory, []))
         return any(self._pattern_matches(pattern, relative_path, path.name) for pattern in patterns)
 
@@ -651,10 +754,14 @@ class FilesService:
             return False
         return True
 
-    def _trim_to_budget(self, results: list[FileSearchHit], budget_tokens: int) -> list[FileSearchHit]:
+    def _trim_to_budget(
+        self,
+        results: builtins.list[FileSearchCandidate],
+        budget_tokens: int,
+    ) -> builtins.list[FileSearchCandidate]:
         if budget_tokens <= 0:
             return []
-        trimmed: list[FileSearchHit] = []
+        trimmed: builtins.list[FileSearchCandidate] = []
         total_tokens = 0
         for result in results:
             result_cost = self._estimate_result_tokens(result)
@@ -665,7 +772,7 @@ class FilesService:
         return trimmed
 
     @staticmethod
-    def _estimate_result_tokens(result: FileSearchHit) -> int:
+    def _estimate_result_tokens(result: FileSearchCandidate) -> int:
         return max(
             1,
             count_tokens(result.file.path) + count_tokens(result.file.root_path) + count_tokens(result.snippet),
@@ -681,7 +788,7 @@ class FilesService:
         self._metadata_service.validate(entity_type, metatags)
 
     @staticmethod
-    def _chunk_values(values: list[str], *, size: int) -> list[list[str]]:
+    def _chunk_values(values: builtins.list[str], *, size: int) -> builtins.list[builtins.list[str]]:
         if size <= 0:
             raise ValueError("size must be greater than zero")
         return [values[index : index + size] for index in range(0, len(values), size)]

@@ -255,6 +255,19 @@ class SqliteFilesRepository(SqliteRepositoryBase):
             rows = connection.execute(query, params).fetchall()
         return [self._row_to_record(row) for row in rows]
 
+    def list_indexed_root_paths(self, *, project: str) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT root_path
+                FROM indexed_files
+                WHERE project = ? AND deleted_at IS NULL
+                ORDER BY root_path
+                """,
+                (project,),
+            ).fetchall()
+        return [str(row["root_path"]) for row in rows]
+
     def list_chunks(self, document_id: str) -> list[FileChunkRecord]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -545,7 +558,7 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                     """,
                     (json.dumps(query_embedding, separators=(",", ":")), "file", project, *filter_params, limit),
                 ).fetchall()
-                candidates = [
+                vector_candidates = [
                     FileSearchCandidate(
                         file=compact_file_item(
                         FileListItem(
@@ -564,14 +577,14 @@ class SqliteFilesRepository(SqliteRepositoryBase):
                     )
                     for row in rows
                 ]
-                candidates.sort(
+                vector_candidates.sort(
                     key=lambda item: combine_search_scores(
                         lexical_score=item.lexical_score,
                         vector_score=item.vector_score,
                     ),
                     reverse=True,
                 )
-                return candidates[:limit]
+                return vector_candidates[:limit]
             if not vector_extension_loaded:
                 require_vector_extension_for_large_python_fallback(connection, project=project)
             rows = connection.execute(

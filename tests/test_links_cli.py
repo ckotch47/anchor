@@ -6,11 +6,34 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from anchor.cli import links_add, links_delete, links_list
+from typer.testing import CliRunner
+
+from anchor.cli import app, links_add, links_delete, links_list
 from anchor.cli_notes import notes_add
 
 
 class LinksCliTest(unittest.TestCase):
+    def test_missing_project_uses_machine_error_envelope(self) -> None:
+        result = CliRunner().invoke(
+            app,
+            [
+                "links",
+                "add",
+                "--source-id",
+                "source",
+                "--target-id",
+                "target",
+                "--relation-type",
+                "references",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 1)
+        payload = json.loads(result.stdout)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"], "links.add")
+        self.assertEqual(payload["error"]["code"], "INVALID_ARGS")
+
     def test_links_add_list_delete_emit_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.toml"
@@ -28,11 +51,11 @@ class LinksCliTest(unittest.TestCase):
                     target_id = target_payload["data"]["note"]["id"]
 
                     with patch("typer.echo") as add_echo_mock:
-                        links_add(source_id=source_id, target_id=target_id, relation_type="references")
+                        links_add(project="repo-a", source_id=source_id, target_id=target_id, relation_type="references")
                     with patch("typer.echo") as list_echo_mock:
-                        links_list(source_id=source_id)
+                        links_list(project="repo-a", source_id=source_id)
                     with patch("typer.echo") as delete_echo_mock:
-                        links_delete(source_id=source_id, target_id=target_id, relation_type="references")
+                        links_delete(project="repo-a", source_id=source_id, target_id=target_id, relation_type="references")
 
         add_payload = json.loads(add_echo_mock.call_args.args[0])
         list_payload = json.loads(list_echo_mock.call_args.args[0])

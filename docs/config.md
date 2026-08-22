@@ -27,17 +27,43 @@ offline_only = true
 memory_auto_extract = false
 memory_external_send = false
 memory_external_projects = []
+embedding_external_send = false
+embedding_external_projects = []
+rerank_external_send = false
+rerank_external_projects = []
 memory_extract_batch_size = 10
+memory_extract_max_facts = 20
 memory_extract_min_interval_seconds = 60
 
 # Use ["*"] only for an explicit all-projects external-send policy.
 
 [provider]
 base_url = "https://api.example.com/v1"
+rerank_base_url = ""
+rerank_api_key_env = ""
 api_key_env = "OPENAI_API_KEY"
 embedding_model = "text-embedding-3-small"
 rerank_model = "gpt-5.5"
 memory_model = ""
+rerank_max_response_bytes = 1048576
+max_batch_items = 100
+max_batch_characters = 200000
+
+`provider.rerank_base_url` is optional. When set, Anchor calls the native
+rerank endpoint. `provider.rerank_api_key_env` is independent from the OpenAI
+key and empty by default; remote endpoints require HTTPS.
+`POST /rerank` endpoint (for example, a llama.cpp server started with
+`--reranking`) instead of asking a chat model to return JSON scores. Leave it
+empty for the OpenAI-compatible chat fallback.
+
+Plain HTTP provider URLs are accepted only for loopback. Remote embedding and
+rerank endpoints additionally require their purpose-specific `*_external_send`
+flag and an exact project entry in the matching allowlist; an empty allowlist is
+always deny. Multi-project search is sent only when every requested project is
+allowed. Provider responses are bounded and diagnostics never persist raw
+provider exception bodies. Embedding calls are split into batches bounded by
+`max_batch_items` and `max_batch_characters`; rerank requests exceeding either
+bound fail locally and retrieval falls back to its non-reranked ordering.
 
 [metadata]
 enabled = true

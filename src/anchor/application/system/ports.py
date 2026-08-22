@@ -7,6 +7,10 @@ class HealthPort(Protocol):
     def health(self): ...
 
 
+class HealthSnapshotPort(Protocol):
+    def snapshot(self) -> dict[str, object]: ...
+
+
 class MaintenancePort(Protocol):
     def checkpoint_wal(self) -> dict[str, int]: ...
 

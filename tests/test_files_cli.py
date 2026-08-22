@@ -6,10 +6,30 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from anchor.cli import files_delete, files_get, files_index, files_list, files_search
+from anchor.cli import files_delete, files_get, files_index, files_list, files_reindex, files_search
 
 
 class FilesCliTest(unittest.TestCase):
+    def test_files_reindex_emits_json_and_forces_rebuild(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            (root / "app.py").write_text("def greet():\n    return 'hello'\n", encoding="utf-8")
+
+            config_path = Path(tmpdir) / "config.toml"
+            db_path = Path(tmpdir) / "anchor.sqlite3"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=db_path):
+                    with patch("typer.echo"):
+                        files_index(root=[str(root)], project="repo-a")
+                    with patch("typer.echo") as reindex_echo_mock:
+                        files_reindex(root=[str(root)], project="repo-a")
+
+        payload = json.loads(reindex_echo_mock.call_args.args[0])
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["command"], "files.reindex")
+        self.assertEqual(payload["data"]["indexed"], 1)
+
     def test_files_index_and_search_emit_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "repo"

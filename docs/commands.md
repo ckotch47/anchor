@@ -88,7 +88,9 @@
 
 - Describes whether the local core is ready and which config/profile was resolved.
 - Useful as the first machine check before any agent workflow.
-- If the maintenance window is due, `health` may also trigger scheduled SQLite cleanup from the `settings` table.
+- Performs side-effect-free storage, integrity, migration, and index-state checks.
+- Returns a non-ready result for storage/integrity/migration failures and a degraded result when derived indexes have errors.
+- Maintenance remains an explicit `anchor db compact` operation; health never vacuums, rebuilds, or mutates user data.
 
 Example:
 
@@ -294,36 +296,37 @@ anchor history delete --id <history-id> --project repo-a
 Example:
 
 ```bash
-anchor links add --source-id <task-id> --target-id <note-id> --relation-type references
+anchor links add --project repo-a --source-id <task-id> --target-id <note-id> --relation-type references
 ```
 
 ### `anchor links list`
 
 - Lists links by `--source-id` or `--target-id`.
+- `--project` is required and both endpoints must exist in that same project.
 - Provide one anchor id to inspect the outgoing or incoming graph neighborhood.
 
 Example:
 
 ```bash
-anchor links list --source-id <task-id>
+anchor links list --project repo-a --source-id <task-id>
 ```
 
 ### `anchor links delete`
 
-- Deletes a typed link by source, target, and relation type.
+- Deletes a typed link by source, target, relation type, and required project scope.
 
 Example:
 
 ```bash
-anchor links delete --source-id <task-id> --target-id <note-id> --relation-type references
+anchor links delete --project repo-a --source-id <task-id> --target-id <note-id> --relation-type references
 ```
 
 ### `anchor tasks add`
 
 - Creates a task in the shared SQLite core.
 - Requires `--title`.
-- Accepts `--body`, `--priority`, `--due-at`, `--task-kind`, `--project`, `--metatags`, `--parent-id`, and `--blocked-by-id`.
-- `--parent-id` and `--blocked-by-id`, when provided, must be UUIDv7 values.
+- Accepts `--body`, `--priority`, `--due-at`, `--task-kind`, `--project`, `--external-key`, `--metatags`, `--parent-id`, and `--blocked-by-id`.
+- `--parent-id` and `--blocked-by-id`, when provided, must identify live tasks in the same project; self-references and relation cycles are rejected.
 - Stores the task through the shared document spine, not a separate tracker database.
 
 Example:
@@ -331,6 +334,39 @@ Example:
 ```bash
 anchor tasks add --title "Ship tasks slice" --body "Implement tasks commands" --priority 2 --project repo-a --metatags '{"topic":"tasks"}'
 ```
+
+### `anchor tasks upsert`, `anchor tasks get-by-external-key`, and `anchor tasks status`
+
+- `tasks upsert --external-key ... --project ...` creates or updates exactly one task per `(project, external_key)`; `source_ref` remains an independent legacy field.
+- Upsert is a full desired-state replacement for its mutable fields: omitted optional values reset to the documented neutral defaults, and both CLI/MCP use `source=anchor` unless the caller supplies one.
+- `tasks get-by-external-key --external-key ... --project ...` is the exact reconciliation lookup; full-text search is never an identity lookup.
+- `tasks status` supports `open`, `in_progress`, `blocked`, `done`, and `closed`. A blocked task requires `--blocked-reason`; `tasks done` remains the backwards-compatible completion shortcut.
+- `tasks update` preserves omitted nullable fields. Use `--clear-due-at`,
+  `--clear-parent-id`, or `--clear-blocked-by-id` to clear one explicitly; a
+  replacement value and its matching clear flag are mutually exclusive. MCP
+  exposes the equivalent boolean `clear_*` fields.
+- Migration `0012_task_external_keys` is expand-only: it backfills only unique legacy rows explicitly owned by `myskills-orchestration`; ambiguous identities are quarantined and unrelated `source_ref` data is not reinterpreted.
+
+```bash
+anchor tasks upsert --external-key work-42 --title "Ship" --project repo-a
+anchor tasks get-by-external-key --external-key work-42 --project repo-a
+anchor tasks status --id <task-id> --status blocked --blocked-reason "waiting for API" --project repo-a
+```
+
+### `anchor capabilities`
+
+- Emits the versioned CLI/MCP handshake as JSON. `data.contract_version`, `data.anchor_version`, and `data.surfaces` are stable machine fields.
+- Anchor 0.4 is the producer-first release for capability contract `1.0`; update Anchor before enabling the matching myskills mutation adapter. Rollback keeps nullable migration columns/tables in place while reverting the executable.
+
+```bash
+anchor capabilities --format json
+```
+
+### `anchor serve`
+
+The optional local Web UI/SSE transport is loopback-only. Non-loopback hosts are
+rejected before the container or server starts; authenticated remote serving is
+outside the supported Anchor 0.4 boundary.
 
 ### `anchor tasks search`
 
@@ -390,6 +426,19 @@ Example:
 
 ```bash
 anchor files index --root ./repo --project repo-a
+```
+
+### `anchor files reindex`
+
+- Rebuilds file chunks and embeddings even when file content and mtime are unchanged.
+- Use it after changing the embedding model or vector dimension.
+- With no `--root`, uses configured roots; if none are configured, it reuses the previously indexed roots for the selected project.
+- The operation remains project-scoped and removes stale files only inside the roots being rebuilt.
+
+Example:
+
+```bash
+anchor files reindex --project repo-a
 ```
 
 ### `anchor files get`

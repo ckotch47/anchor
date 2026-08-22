@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import json
 import sqlite3
 from pathlib import Path
@@ -39,7 +40,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
         project: str,
         correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
-        chunks: list[DocumentChunkDraft] | None = None,
+        chunks: builtins.list[DocumentChunkDraft] | None = None,
     ) -> NoteRecord:
         note_id = uuid7_str()
         now = utc_now_iso()
@@ -102,7 +103,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
         pinned: bool | None = None,
         correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
-        chunks: list[DocumentChunkDraft] | None = None,
+        chunks: builtins.list[DocumentChunkDraft] | None = None,
     ) -> NoteRecord | None:
         current = self.get(note_id, project=project)
         if current is None:
@@ -242,11 +243,11 @@ class SqliteNotesRepository(SqliteRepositoryBase):
         *,
         project: str,
         cursor_id: str | None = None,
-    ) -> list[NoteRecord]:
+    ) -> builtins.list[NoteRecord]:
         if cursor_id is not None and not cursor_id.strip():
             raise ValueError("list cursor requires a non-empty cursor_id")
         clauses = ["d.project = ?", "d.document_type = 'note'", "d.deleted_at IS NULL"]
-        params: list[object] = [project]
+        params: builtins.list[object] = [project]
         if cursor_id is not None:
             clauses.append("d.id < ?")
             params.append(cursor_id)
@@ -348,7 +349,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
             return None
         return self._row_to_record(row)
 
-    def list_chunks(self, document_id: str) -> list[DocumentChunkRecord]:
+    def list_chunks(self, document_id: str) -> builtins.list[DocumentChunkRecord]:
         with self._connect() as connection:
             rows = connection.execute(
                 """
@@ -363,7 +364,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
 
     def store_chunk_embeddings(
         self,
-        embeddings: list[ChunkEmbeddingRecord],
+        embeddings: builtins.list[ChunkEmbeddingRecord],
         *,
         project: str,
         metatags: str,
@@ -407,7 +408,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
             )
             connection.commit()
 
-    def pending_embedding_documents(self, *, project: str, limit: int = 8) -> list[str]:
+    def pending_embedding_documents(self, *, project: str, limit: int = 8) -> builtins.list[str]:
         with self._write_connect() as connection:
             rows = connection.execute(
                 """
@@ -465,7 +466,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
             )
             connection.commit()
 
-    def search(self, query: str, limit: int, *, project: str) -> list[NotesSearchHit]:
+    def search(self, query: str, limit: int, *, project: str) -> builtins.list[NotesSearchHit]:
         candidates = self.search_lexical_candidates(query=query, limit=limit, project=project)
         return [
             NotesSearchHit(
@@ -477,7 +478,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
             for candidate in candidates
         ]
 
-    def search_lexical_candidates(self, query: str, limit: int, *, project: str) -> list[NotesSearchCandidate]:
+    def search_lexical_candidates(self, query: str, limit: int, *, project: str) -> builtins.list[NotesSearchCandidate]:
         match_query = normalize_fts5_query(query)
         with self._write_connect() as connection:
             rows = connection.execute(
@@ -539,11 +540,11 @@ class SqliteNotesRepository(SqliteRepositoryBase):
 
     def search_vector_candidates(
         self,
-        query_embedding: list[float],
+        query_embedding: builtins.list[float],
         limit: int,
         *,
         project: str,
-    ) -> list[NotesSearchCandidate]:
+    ) -> builtins.list[NotesSearchCandidate]:
         with self._write_connect() as connection:
             vector_extension_loaded = try_load_sqlite_vector_extension(connection)
             if vector_extension_loaded and ensure_vector_index(
@@ -582,7 +583,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                     """,
                     (json.dumps(query_embedding, separators=(",", ":")), "note", project, limit),
                 ).fetchall()
-                candidates = [
+                vector_candidates = [
                     NotesSearchCandidate(
                         note=self._row_to_search_item(row),
                         chunk_id=str(row["chunk_id"]),
@@ -592,14 +593,14 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                     )
                     for row in rows
                 ]
-                candidates.sort(
+                vector_candidates.sort(
                     key=lambda item: combine_search_scores(
                         lexical_score=item.lexical_score,
                         vector_score=item.vector_score,
                     ),
                     reverse=True,
                 )
-                return candidates[:limit]
+                return vector_candidates[:limit]
             if not vector_extension_loaded:
                 require_vector_extension_for_large_python_fallback(connection, project=project)
             rows = connection.execute(
@@ -652,7 +653,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
                 """,
                 ("note", project),
             ).fetchall()
-            candidates: list[NotesSearchCandidate] = []
+            candidates: builtins.list[NotesSearchCandidate] = []
             for row in rows:
                 embedding = self._deserialize_embedding(row["embedding"])
                 vector_score = cosine_similarity(query_embedding, embedding)
@@ -735,7 +736,7 @@ class SqliteNotesRepository(SqliteRepositoryBase):
         title: str,
         project: str,
         metatags: str,
-        chunks: list[DocumentChunkDraft],
+        chunks: builtins.list[DocumentChunkDraft],
         created_at: str,
     ) -> None:
         for chunk_index, chunk in enumerate(chunks):
@@ -767,11 +768,11 @@ class SqliteNotesRepository(SqliteRepositoryBase):
             )
 
     @staticmethod
-    def _serialize_embedding(embedding: list[float]) -> bytes:
+    def _serialize_embedding(embedding: builtins.list[float]) -> bytes:
         return json.dumps(embedding, separators=(",", ":")).encode("utf-8")
 
     @staticmethod
-    def _deserialize_embedding(raw_value: object) -> list[float]:
+    def _deserialize_embedding(raw_value: object) -> builtins.list[float]:
         if isinstance(raw_value, (bytes, bytearray)):
             raw_text = raw_value.decode("utf-8")
         elif isinstance(raw_value, str):

@@ -8,11 +8,23 @@ from unittest.mock import patch
 
 from typer import Exit
 
-from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.cli import tasks_add, tasks_delete, tasks_done, tasks_get, tasks_list, tasks_search, tasks_update
 
 
 class TasksCliTest(unittest.TestCase):
+    def test_tasks_search_rejects_unbounded_limit_with_machine_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            db_path = Path(tmpdir) / "anchor.sqlite3"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=db_path):
+                    with patch("typer.echo") as echo_mock:
+                        with self.assertRaises(Exit):
+                            tasks_search(query="deploy", limit=101, project="repo-a")
+
+        payload = json.loads(echo_mock.call_args.args[0])
+        self.assertEqual(payload["error"]["code"], "INVALID_ARGS")
+
     def test_tasks_add_list_and_done_emit_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.toml"
@@ -27,7 +39,7 @@ class TasksCliTest(unittest.TestCase):
                             metatags='{"topic":"tasks"}',
                             priority=2,
                             due_at="2026-06-30T00:00:00+00:00",
-                            parent_document_id=uuid7_str(),
+                        parent_document_id=None,
                         )
                     with patch("typer.echo") as second_add_echo_mock:
                         tasks_add(title="Second task", body="Second body", project="repo-a")
@@ -83,6 +95,52 @@ class TasksCliTest(unittest.TestCase):
         self.assertEqual(update_payload["data"]["task"]["title"], "Ship tasks slice v2")
         self.assertEqual(update_payload["data"]["task"]["priority"], 5)
         self.assertEqual(update_payload["data"]["task"]["project"], "repo-a")
+
+    def test_tasks_update_explicitly_clears_nullable_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            db_path = Path(tmpdir) / "anchor.sqlite3"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=db_path):
+                    with patch("typer.echo") as add_echo_mock:
+                        tasks_add(
+                            title="Clear relations",
+                            project="repo-a",
+                            due_at="2026-07-01T00:00:00+00:00",
+                        )
+                    task_id = json.loads(add_echo_mock.call_args.args[0])["data"]["task"]["id"]
+                    with patch("typer.echo") as update_echo_mock:
+                        tasks_update(
+                            task_id=task_id,
+                            project="repo-a",
+                            clear_due_at=True,
+                        )
+
+        update_payload = json.loads(update_echo_mock.call_args.args[0])
+        self.assertTrue(update_payload["ok"])
+        self.assertIsNone(update_payload["data"]["task"]["due_at"])
+
+    def test_tasks_update_rejects_set_and_clear_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            db_path = Path(tmpdir) / "anchor.sqlite3"
+            with patch("anchor.config.default_config_path", return_value=config_path):
+                with patch("anchor.container.default_database_path", return_value=db_path):
+                    with patch("typer.echo") as add_echo_mock:
+                        tasks_add(title="Conflict", project="repo-a")
+                    task_id = json.loads(add_echo_mock.call_args.args[0])["data"]["task"]["id"]
+                    with patch("typer.echo") as update_echo_mock:
+                        with self.assertRaises(Exit):
+                            tasks_update(
+                                task_id=task_id,
+                                project="repo-a",
+                                due_at="2026-07-01T00:00:00+00:00",
+                                clear_due_at=True,
+                            )
+
+        update_payload = json.loads(update_echo_mock.call_args.args[0])
+        self.assertFalse(update_payload["ok"])
+        self.assertEqual(update_payload["error"]["code"], "INVALID_ARGS")
 
     def test_tasks_get_emit_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

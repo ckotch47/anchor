@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import builtins
 import json
 import sqlite3
 from pathlib import Path
+from typing import Literal, cast
 
 from anchor.adapters.sqlite_ids import uuid7_str
 from anchor.adapters.sqlite_link_summaries import parse_link_summaries
@@ -12,7 +14,7 @@ from anchor.adapters.sqlite_support import utc_now_iso
 from anchor.application.links.models import DocumentLinkSummary
 from anchor.application.retrieval.search_query import normalize_fts5_query
 from anchor.application.retrieval.search_scoring import combine_search_scores
-from anchor.application.tasks.models import TaskListItem, TaskRecord, TaskSearchHit
+from anchor.application.tasks.models import TaskListItem, TaskRecord, TaskSearchHit, TaskStatus
 
 
 class SqliteTasksRepository(SqliteRepositoryBase):
@@ -26,6 +28,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         body: str,
         source: str = "cli",
         source_ref: str = "",
+        external_key: str | None = None,
         project: str,
         correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
@@ -40,7 +43,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         serialized_metatags = self._serialize_metatags(metatags or {})
         body_value = body.strip() or title
         resolved_correlation_id = correlation_id or uuid7_str()
-        with self._connect() as connection:
+        with self._write_connect() as connection:
             connection.execute(
                 """
                 INSERT INTO documents (
@@ -82,6 +85,18 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                     blocked_by_document_id,
                 ),
             )
+            if external_key is not None:
+                connection.execute(
+                    "UPDATE tasks SET external_key = ? WHERE document_id = ? AND project = ?",
+                    (external_key, task_id, project),
+                )
+            self._validate_task_links(
+                connection,
+                project=project,
+                task_id=task_id,
+                parent_document_id=parent_document_id,
+                blocked_by_document_id=blocked_by_document_id,
+            )
             self._write_task_chunk(
                 connection,
                 document_id=task_id,
@@ -97,6 +112,19 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                 raise RuntimeError("created task could not be reloaded")
             return task
 
+    def get_by_external_key(self, external_key: str, *, project: str) -> TaskRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT document_id FROM tasks
+                WHERE project = ? AND external_key = ?
+                """,
+                (project, external_key),
+            ).fetchone()
+        if row is None:
+            return None
+        return self.get(str(row["document_id"]), project=project)
+
     def update(
         self,
         task_id: str,
@@ -106,6 +134,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         body: str | None = None,
         source: str | None = None,
         source_ref: str | None = None,
+        external_key: str | None = None,
         correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
         task_kind: str | None = None,
@@ -113,6 +142,10 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         due_at: str | None = None,
         parent_document_id: str | None = None,
         blocked_by_document_id: str | None = None,
+        clear_due_at: bool = False,
+        clear_parent_document_id: bool = False,
+        clear_blocked_by_document_id: bool = False,
+        replace_nullable_fields: bool = False,
     ) -> TaskRecord | None:
         current = self.get(task_id, project=project)
         if current is None:
@@ -121,21 +154,39 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         updated_body = body if body is not None else current.body
         updated_source = source if source is not None else current.source
         updated_source_ref = source_ref if source_ref is not None else current.source_ref
+        updated_external_key = external_key if external_key is not None else current.external_key
         updated_correlation_id = correlation_id if correlation_id is not None else current.correlation_id
         updated_metatags = metatags if metatags is not None else current.metatags
         updated_task_kind = task_kind if task_kind is not None else current.task_kind
         updated_priority = priority if priority is not None else current.priority
-        updated_due_at = due_at if due_at is not None else current.due_at
+        updated_due_at = (
+            None
+            if clear_due_at
+            else due_at if due_at is not None or replace_nullable_fields else current.due_at
+        )
         updated_parent_document_id = (
-            parent_document_id if parent_document_id is not None else current.parent_document_id
+            None
+            if clear_parent_document_id
+            else parent_document_id if parent_document_id is not None or replace_nullable_fields else current.parent_document_id
         )
         updated_blocked_by_document_id = (
-            blocked_by_document_id if blocked_by_document_id is not None else current.blocked_by_document_id
+            None
+            if clear_blocked_by_document_id
+            else blocked_by_document_id
+            if blocked_by_document_id is not None or replace_nullable_fields
+            else current.blocked_by_document_id
         )
         body_value = updated_body.strip() or updated_title
         serialized_metatags = self._serialize_metatags(updated_metatags)
         now = utc_now_iso()
-        with self._connect() as connection:
+        with self._write_connect() as connection:
+            self._validate_task_links(
+                connection,
+                project=project,
+                task_id=task_id,
+                parent_document_id=updated_parent_document_id,
+                blocked_by_document_id=updated_blocked_by_document_id,
+            )
             connection.execute(
                 """
                 UPDATE documents
@@ -162,7 +213,8 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                     priority = ?,
                     due_at = ?,
                     parent_document_id = ?,
-                    blocked_by_document_id = ?
+                    blocked_by_document_id = ?,
+                    external_key = ?
                 WHERE document_id = ? AND project = ?
                 """,
                 (
@@ -172,6 +224,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                     updated_due_at,
                     updated_parent_document_id,
                     updated_blocked_by_document_id,
+                    updated_external_key,
                     task_id,
                     project,
                 ),
@@ -212,11 +265,11 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         project: str,
         full: bool = False,
         cursor_id: str | None = None,
-    ) -> list[TaskListItem | TaskRecord]:
+    ) -> builtins.list[TaskListItem | TaskRecord]:
         if cursor_id is not None and not cursor_id.strip():
             raise ValueError("list cursor requires a non-empty cursor_id")
         clauses = ["d.project = ?", "d.document_type = 'task'", "d.deleted_at IS NULL"]
-        params: list[object] = [project]
+        params: builtins.list[object] = [project]
         if cursor_id is not None:
             clauses.append("d.id < ?")
             params.append(cursor_id)
@@ -231,6 +284,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                     d.body,
                     d.source,
                     d.source_ref,
+                    t.external_key,
                     t.task_kind,
                     t.status,
                     t.priority,
@@ -286,6 +340,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                     d.body,
                     d.source,
                     d.source_ref,
+                    t.external_key,
                     t.task_kind,
                     t.status,
                     t.priority,
@@ -328,11 +383,29 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         return self._row_to_record(row)
 
     def complete(self, task_id: str, *, project: str) -> TaskRecord | None:
+        return self.set_status(task_id, project=project, status="done")
+
+    def set_status(
+        self,
+        task_id: str,
+        *,
+        project: str,
+        status: Literal["open", "in_progress", "blocked", "done", "closed"],
+        blocked_reason: str | None = None,
+        expected_status: str | None = None,
+    ) -> TaskRecord | None:
         current = self.get(task_id, project=project)
         if current is None:
             return None
         now = utc_now_iso()
-        started_at = current.started_at or now
+        started_at = current.started_at
+        completed_at = current.completed_at
+        if status in {"in_progress", "blocked", "done", "closed"}:
+            started_at = started_at or now
+        if status in {"done", "closed"}:
+            completed_at = completed_at or now
+        elif status in {"open", "in_progress", "blocked"}:
+            completed_at = None
         with self._write_connect() as connection:
             connection.execute(
                 """
@@ -342,22 +415,88 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                 """,
                 (now, task_id, project),
             )
-            connection.execute(
+            cursor = connection.execute(
                 """
                 UPDATE tasks
-                SET status = 'done',
+                SET status = ?,
                     started_at = ?,
                     completed_at = ?,
-                    blocked_reason = NULL
+                    blocked_reason = ?
                 WHERE document_id = ? AND project = ?
+                  AND (? IS NULL OR status = ?)
                 """,
-                (started_at, now, task_id, project),
+                (
+                    status,
+                    started_at,
+                    completed_at,
+                    blocked_reason if status == "blocked" else None,
+                    task_id,
+                    project,
+                    expected_status,
+                    expected_status,
+                ),
             )
+            if cursor.rowcount == 0:
+                connection.rollback()
+                return None
             connection.commit()
             updated = self.get(task_id, project=project)
             if updated is None:
                 raise RuntimeError("completed task could not be reloaded")
             return updated
+
+    @staticmethod
+    def _validate_task_links(
+        connection: sqlite3.Connection,
+        *,
+        project: str,
+        task_id: str,
+        parent_document_id: str | None,
+        blocked_by_document_id: str | None,
+    ) -> None:
+        for field, related_id in (
+            ("parent_document_id", parent_document_id),
+            ("blocked_by_document_id", blocked_by_document_id),
+        ):
+            if related_id is None:
+                continue
+            if related_id == task_id:
+                raise ValueError(f"{field} cannot reference the task itself")
+            row = connection.execute(
+                """
+                SELECT 1 FROM documents AS d
+                JOIN tasks AS t ON t.document_id = d.id
+                WHERE d.id = ? AND d.project = ? AND t.project = ?
+                  AND d.document_type = 'task' AND d.deleted_at IS NULL
+                """,
+                (related_id, project, project),
+            ).fetchone()
+            if row is None:
+                raise LookupError(f"{field} must reference a task in project {project}")
+            relation_column = (
+                "parent_document_id"
+                if field == "parent_document_id"
+                else "blocked_by_document_id"
+            )
+            creates_cycle = connection.execute(
+                f"""
+                WITH RECURSIVE relation_chain(document_id) AS (
+                    SELECT {relation_column}
+                    FROM tasks
+                    WHERE document_id = ? AND project = ?
+                    UNION
+                    SELECT task.{relation_column}
+                    FROM tasks AS task
+                    JOIN relation_chain AS chain
+                      ON task.document_id = chain.document_id
+                    WHERE task.project = ? AND chain.document_id IS NOT NULL
+                )
+                SELECT 1 FROM relation_chain WHERE document_id = ? LIMIT 1
+                """,
+                (related_id, project, project, task_id),
+            ).fetchone()
+            if creates_cycle is not None:
+                raise ValueError(f"{field} would create a cycle")
 
     def delete(self, task_id: str, *, project: str) -> TaskRecord | None:
         current = self.get(task_id, project=project)
@@ -391,7 +530,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         invalidate_memory_facts_for_evidence(self._database_path, [task_id])
         return current
 
-    def search(self, query: str, limit: int, *, project: str) -> list[TaskSearchHit]:
+    def search(self, query: str, limit: int, *, project: str) -> builtins.list[TaskSearchHit]:
         match_query = normalize_fts5_query(query)
         self._backfill_missing_task_chunks(project=project)
         with self._write_connect() as connection:
@@ -406,6 +545,7 @@ class SqliteTasksRepository(SqliteRepositoryBase):
                     d.body,
                     d.source,
                     d.source_ref,
+                    t.external_key,
                     t.task_kind,
                     t.status,
                     t.priority,
@@ -466,8 +606,9 @@ class SqliteTasksRepository(SqliteRepositoryBase):
             body=str(row["body"]),
             source=str(row["source"]),
             source_ref=str(row["source_ref"]),
+            external_key=row["external_key"],
             task_kind=str(row["task_kind"]),
-            status=str(row["status"]),
+            status=cast(TaskStatus, str(row["status"])),
             priority=int(row["priority"]),
             due_at=row["due_at"],
             started_at=row["started_at"],
@@ -498,8 +639,8 @@ class SqliteTasksRepository(SqliteRepositoryBase):
         )
 
     @staticmethod
-    def _row_to_links(row: sqlite3.Row) -> list[DocumentLinkSummary]:
-        shortcuts: list[DocumentLinkSummary] = []
+    def _row_to_links(row: sqlite3.Row) -> builtins.list[DocumentLinkSummary]:
+        shortcuts: builtins.list[DocumentLinkSummary] = []
         parent_document_id = row["parent_document_id"]
         blocked_by_document_id = row["blocked_by_document_id"]
         if parent_document_id is not None:

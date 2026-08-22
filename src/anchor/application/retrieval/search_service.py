@@ -13,7 +13,7 @@ from anchor.application.notes.models import NotesSearchResult
 from anchor.application.notes.service import NotesService
 from anchor.application.retrieval.document_chunking import count_tokens
 from anchor.application.retrieval.search_models import SearchHit, SearchResult, SearchStats
-from anchor.application.retrieval.search_query import SearchQuery
+from anchor.application.retrieval.search_query import MAX_RETRIEVAL_LIMIT, SearchQuery
 from anchor.application.tasks.models import TasksSearchResult
 from anchor.application.tasks.service import TasksService
 
@@ -45,10 +45,18 @@ class SearchService:
         requested_types = search_query.types or ["notes", "tasks", "history", "files"]
         requested_projects = search_query.projects or [search_query.project]
         prefer_lexical_only = self._prefer_lexical_only(search_query.query)
-        query_embedding = self._resolve_query_embedding(search_query.query, prefer_lexical_only)
+        query_embedding = self._resolve_query_embedding(
+            search_query.query,
+            prefer_lexical_only,
+            requested_projects,
+        )
         per_type_budgets = self._allocate_budgets(search_query.budget_tokens, requested_types, search_query.weights)
         project_count = len(requested_projects)
-        per_project_candidate_limit = max(1, max(search_query.limit * 4, search_query.limit) // project_count)
+        expanded_limit = min(
+            MAX_RETRIEVAL_LIMIT,
+            max(search_query.limit * 4, search_query.limit + 1),
+        )
+        per_project_candidate_limit = max(1, (expanded_limit + project_count - 1) // project_count)
         candidate_counts: dict[str, int] = {}
         candidates: list[SearchHit] = []
         for search_type in requested_types:
@@ -252,11 +260,18 @@ class SearchService:
     def _prefer_lexical_only(query: str) -> bool:
         return count_tokens(query) <= 1 or len(query.strip()) <= 4
 
-    def _resolve_query_embedding(self, query: str, prefer_lexical_only: bool) -> list[float] | None:
+    def _resolve_query_embedding(
+        self,
+        query: str,
+        prefer_lexical_only: bool,
+        projects: list[str],
+    ) -> list[float] | None:
         if prefer_lexical_only or self._embedding_service is None:
             return None
         try:
-            return self._embedding_service.embed_texts([query]).embeddings[0].embedding
+            return self._embedding_service.embed_texts(
+                [query], projects=projects
+            ).embeddings[0].embedding
         except Exception:
             return None
 

@@ -10,51 +10,55 @@ class DocumentLinksService:
         self._repository = repository
         self._config = config or LinksConfig()
 
-    def create(self, source_id: str, target_id: str, relation_type: str) -> DocumentLinkRecord:
+    def create(self, project: str, source_id: str, target_id: str, relation_type: str) -> DocumentLinkRecord:
+        self._require_non_empty(project, "project")
         self._require_non_empty(source_id, "source_id")
         self._require_non_empty(target_id, "target_id")
         self._require_non_empty(relation_type, "relation_type")
         self._validate_relation_type(relation_type)
-        return self._repository.create(source_id=source_id, target_id=target_id, relation_type=relation_type)
+        return self._repository.create(project=project, source_id=source_id, target_id=target_id, relation_type=relation_type)
 
-    def list_by_source(self, source_id: str) -> DocumentLinkListResult:
+    def list_by_source(self, source_id: str, *, project: str) -> DocumentLinkListResult:
+        self._require_non_empty(project, "project")
         self._require_non_empty(source_id, "source_id")
-        links = self._repository.list_by_source(source_id)
+        links = self._repository.list_by_source(source_id, project=project)
         return DocumentLinkListResult(count=len(links), links=links)
 
-    def list_by_target(self, target_id: str) -> DocumentLinkListResult:
+    def list_by_target(self, target_id: str, *, project: str) -> DocumentLinkListResult:
+        self._require_non_empty(project, "project")
         self._require_non_empty(target_id, "target_id")
-        links = self._repository.list_by_target(target_id)
+        links = self._repository.list_by_target(target_id, project=project)
         return DocumentLinkListResult(count=len(links), links=links)
 
-    def delete(self, source_id: str, target_id: str, relation_type: str) -> bool:
+    def delete(self, project: str, source_id: str, target_id: str, relation_type: str) -> bool:
+        self._require_non_empty(project, "project")
         self._require_non_empty(source_id, "source_id")
         self._require_non_empty(target_id, "target_id")
         self._require_non_empty(relation_type, "relation_type")
         self._validate_relation_type(relation_type)
-        return self._repository.delete(source_id=source_id, target_id=target_id, relation_type=relation_type)
+        return self._repository.delete(project=project, source_id=source_id, target_id=target_id, relation_type=relation_type)
 
-    def summarize(self, document_id: str, *, shortcuts: list[DocumentLinkSummary] | None = None, limit: int = 5) -> list[DocumentLinkSummary]:
+    def summarize(self, document_id: str, *, project: str, shortcuts: list[DocumentLinkSummary] | None = None, limit: int = 5) -> list[DocumentLinkSummary]:
         self._require_non_empty(document_id, "document_id")
         if limit <= 0:
             return []
         summaries: list[DocumentLinkSummary] = []
         seen: set[tuple[str, str, str]] = set()
-        for link in shortcuts or []:
-            self._append_summary(summaries, seen, link)
-        for link in self._repository.list_by_source(document_id):
+        for shortcut in shortcuts or []:
+            self._append_summary(summaries, seen, shortcut)
+        for outgoing in self._repository.list_by_source(document_id, project=project):
             self._append_summary(
                 summaries,
                 seen,
-                DocumentLinkSummary(id=link.target_id, type=link.relation_type, direction="out"),
+                DocumentLinkSummary(id=outgoing.target_id, type=outgoing.relation_type, direction="out"),
             )
             if len(summaries) >= limit:
                 return summaries[:limit]
-        for link in self._repository.list_by_target(document_id):
+        for incoming in self._repository.list_by_target(document_id, project=project):
             self._append_summary(
                 summaries,
                 seen,
-                DocumentLinkSummary(id=link.source_id, type=link.relation_type, direction="in"),
+                DocumentLinkSummary(id=incoming.source_id, type=incoming.relation_type, direction="in"),
             )
             if len(summaries) >= limit:
                 return summaries[:limit]

@@ -155,6 +155,24 @@ class EmptyService:
 
 
 class SearchServiceTest(unittest.TestCase):
+    def test_unified_search_expands_lookahead_within_shared_bound(self) -> None:
+        class RecordingNotesService:
+            def __init__(self) -> None:
+                self.limits: list[int] = []
+
+            def search(self, query: str, limit: int = 20, **kwargs) -> NotesSearchResult:
+                del query, kwargs
+                self.limits.append(limit)
+                return NotesSearchResult(query="deploy", count=0, results=[])
+
+        notes = RecordingNotesService()
+        service = SearchService(notes, EmptyService(), EmptyService(), EmptyService())
+
+        for limit in (25, 26, 100):
+            service.search(SearchQuery(query="deploy", project="repo-a", types=["notes"], limit=limit))
+
+        self.assertEqual(notes.limits, [100, 100, 100])
+
     def test_search_combines_notes_tasks_history_and_files(self) -> None:
         service = SearchService(
             FakeNotesService(),
@@ -368,9 +386,14 @@ class SearchServiceTest(unittest.TestCase):
             def __init__(self) -> None:
                 self.calls = 0
 
-            def embed_texts(self, texts: list[str]) -> FakeEmbeddingBatch:
+            def embed_texts(
+                self,
+                texts: list[str],
+                *,
+                projects: list[str] | None = None,
+            ) -> FakeEmbeddingBatch:
                 self.calls += 1
-                del texts
+                del texts, projects
                 return FakeEmbeddingBatch([0.1, 0.2, 0.3])
 
         class TrackingNotesService(FakeNotesService):

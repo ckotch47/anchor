@@ -1,0 +1,54 @@
+services:
+  anchor-reranker:
+    image: vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967
+    profiles: ["gpu"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    shm_size: "8gb"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    stop_grace_period: 30s
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      VLLM_WORKER_MULTIPROC_METHOD: spawn
+    volumes:
+      - reranker-cache:/root/.cache/huggingface
+    command:
+      - --model
+      - Qwen/Qwen3-Reranker-0.6B
+      - --task
+      - score
+      - --runner
+      - pooling
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read(1)"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 5m
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  reranker-cache:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -32,7 +33,7 @@ class SqliteMaintenanceRepositoryTest(unittest.TestCase):
                 ],
             )
 
-            with sqlite3.connect(db_path) as connection:
+            with closing(sqlite3.connect(db_path)) as connection:
                 connection.execute(
                     "DELETE FROM document_chunks_fts WHERE document_type = 'note' AND document_id = ?", (note.id,)
                 )
@@ -67,7 +68,7 @@ class SqliteMaintenanceRepositoryTest(unittest.TestCase):
             notes_repository.delete(note.id, project="repo-a")
             purged = maintenance_repository.purge_deleted_documents(project="repo-a")
 
-            with sqlite3.connect(db_path) as connection:
+            with closing(sqlite3.connect(db_path)) as connection:
                 document_rows = connection.execute(
                     "SELECT COUNT(*) FROM documents WHERE id = ?",
                     (note.id,),
@@ -107,7 +108,7 @@ class SqliteMaintenanceRepositoryTest(unittest.TestCase):
                 ],
             )
 
-            with sqlite3.connect(db_path) as connection:
+            with closing(sqlite3.connect(db_path)) as connection:
                 connection.execute(
                     "DELETE FROM document_chunks_fts WHERE document_type = 'note' AND document_id = ?", (note.id,)
                 )
@@ -132,7 +133,7 @@ class SqliteMaintenanceRepositoryTest(unittest.TestCase):
 
             ran = maintenance_repository.auto_maintain_if_due()
 
-            with sqlite3.connect(db_path) as connection:
+            with closing(sqlite3.connect(db_path)) as connection:
                 last_vacuum = connection.execute(
                     "SELECT value FROM settings WHERE scope = ? AND key = ?",
                     ("maintenance", "last_vacuum"),
@@ -148,7 +149,7 @@ class SqliteMaintenanceRepositoryTest(unittest.TestCase):
             SqliteMigrationRepository(database_path=db_path).apply_pending()
             maintenance_repository = SqliteMaintenanceRepository(database_path=db_path)
 
-            with sqlite3.connect(db_path) as connection:
+            with closing(sqlite3.connect(db_path)) as connection:
                 connection.execute(
                     """
                     INSERT INTO settings (scope, key, value, updated_at)

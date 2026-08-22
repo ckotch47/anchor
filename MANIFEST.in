@@ -1,0 +1,2 @@
+include docker-compose.reranker.yml
+include docs/reranker-compose.md

@@ -27,6 +27,7 @@ class FakeTasksRepository:
         body: str,
         source: str,
         source_ref: str,
+        external_key: str | None = None,
         project: str,
         correlation_id: str,
         metatags: dict[str, object] | None = None,
@@ -45,6 +46,7 @@ class FakeTasksRepository:
             body=body,
             source=source,
             source_ref=source_ref,
+            external_key=external_key,
             task_kind=task_kind,
             status="open",
             priority=priority,
@@ -95,6 +97,7 @@ class FakeTasksRepository:
         body: str | None = None,
         source: str | None = None,
         source_ref: str | None = None,
+        external_key: str | None = None,
         correlation_id: str | None = None,
         metatags: dict[str, object] | None = None,
         task_kind: str | None = None,
@@ -102,7 +105,12 @@ class FakeTasksRepository:
         due_at: str | None = None,
         parent_document_id: str | None = None,
         blocked_by_document_id: str | None = None,
+        clear_due_at: bool = False,
+        clear_parent_document_id: bool = False,
+        clear_blocked_by_document_id: bool = False,
+        replace_nullable_fields: bool = False,
     ) -> TaskRecord | None:
+        del replace_nullable_fields
         if self.created is None or self.created.id != task_id:
             return None
         self.updated = self.created.model_copy(
@@ -112,16 +120,25 @@ class FakeTasksRepository:
                 "body": body if body is not None else self.created.body,
                 "source": source if source is not None else self.created.source,
                 "source_ref": source_ref if source_ref is not None else self.created.source_ref,
+                "external_key": (
+                    external_key if external_key is not None else self.created.external_key
+                ),
                 "correlation_id": correlation_id if correlation_id is not None else self.created.correlation_id,
                 "metatags": metatags if metatags is not None else self.created.metatags,
                 "task_kind": task_kind if task_kind is not None else self.created.task_kind,
                 "priority": priority if priority is not None else self.created.priority,
-                "due_at": due_at if due_at is not None else self.created.due_at,
+                "due_at": None if clear_due_at else due_at if due_at is not None else self.created.due_at,
                 "parent_document_id": (
-                    parent_document_id if parent_document_id is not None else self.created.parent_document_id
+                    None
+                    if clear_parent_document_id
+                    else parent_document_id
+                    if parent_document_id is not None
+                    else self.created.parent_document_id
                 ),
                 "blocked_by_document_id": (
-                    blocked_by_document_id
+                    None
+                    if clear_blocked_by_document_id
+                    else blocked_by_document_id
                     if blocked_by_document_id is not None
                     else self.created.blocked_by_document_id
                 ),
@@ -288,6 +305,43 @@ class TasksServiceTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             service.update(TASK_ID, project="repo-a")
+
+    def test_update_can_explicitly_clear_nullable_fields(self) -> None:
+        repo = FakeTasksRepository()
+        service = TasksService(repository=repo, project="workspace")
+        service.add(
+            title="Ship tasks",
+            body="Implement task slice",
+            project="repo-a",
+            due_at="2026-07-01T00:00:00+00:00",
+            parent_document_id=TASK_PARENT_ID,
+            blocked_by_document_id=TASK_BLOCKED_BY_ID,
+        )
+
+        updated = service.update(
+            TASK_ID,
+            project="repo-a",
+            clear_due_at=True,
+            clear_parent_document_id=True,
+            clear_blocked_by_document_id=True,
+        )
+
+        self.assertIsNone(updated.due_at)
+        self.assertIsNone(updated.parent_document_id)
+        self.assertIsNone(updated.blocked_by_document_id)
+
+    def test_update_rejects_set_and_clear_conflict(self) -> None:
+        repo = FakeTasksRepository()
+        service = TasksService(repository=repo, project="workspace")
+        service.add(title="Ship tasks", body="Implement task slice", project="repo-a")
+
+        with self.assertRaises(ValueError):
+            service.update(
+                TASK_ID,
+                project="repo-a",
+                due_at="2026-07-01T00:00:00+00:00",
+                clear_due_at=True,
+            )
 
     def test_add_rejects_empty_title(self) -> None:
         repo = FakeTasksRepository()

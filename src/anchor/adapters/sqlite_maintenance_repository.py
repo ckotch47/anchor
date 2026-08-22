@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from anchor.adapters.sqlite_repository import SqliteRepositoryBase
-from anchor.adapters.sqlite_support import configure_connection, sqlite_write_lock, utc_now_iso
+from anchor.adapters.sqlite_support import configure_connection, connect_trusted_sqlite, sqlite_write_lock, utc_now_iso
 
 
 class SqliteMaintenanceRepository(SqliteRepositoryBase):
@@ -26,9 +26,9 @@ class SqliteMaintenanceRepository(SqliteRepositoryBase):
         if interval_days <= 0:
             raise ValueError("interval_days must be greater than zero")
         with sqlite_write_lock(self._database_path):
-            connection = sqlite3.connect(self._database_path)
+            connection = connect_trusted_sqlite(self._database_path)
             try:
-                configure_connection(connection, busy_timeout_ms=250)
+                configure_connection(connection, busy_timeout_ms=250, database_path=self._database_path)
                 last_vacuum = self._get_setting(connection, self.MAINTENANCE_SCOPE, self.LAST_VACUUM_KEY)
                 if not self._maintenance_due(last_vacuum, interval_days=interval_days):
                     return False
@@ -37,17 +37,17 @@ class SqliteMaintenanceRepository(SqliteRepositoryBase):
                 connection.commit()
                 connection.close()
 
-                vacuum_connection = sqlite3.connect(self._database_path)
+                vacuum_connection = connect_trusted_sqlite(self._database_path)
                 try:
-                    configure_connection(vacuum_connection, busy_timeout_ms=250)
+                    configure_connection(vacuum_connection, busy_timeout_ms=250, database_path=self._database_path)
                     vacuum_connection.execute("VACUUM")
                     vacuum_connection.commit()
                 finally:
                     vacuum_connection.close()
 
-                settings_connection = sqlite3.connect(self._database_path)
+                settings_connection = connect_trusted_sqlite(self._database_path)
                 try:
-                    configure_connection(settings_connection, busy_timeout_ms=250)
+                    configure_connection(settings_connection, busy_timeout_ms=250, database_path=self._database_path)
                     self._set_setting(
                         settings_connection,
                         self.MAINTENANCE_SCOPE,
@@ -87,9 +87,9 @@ class SqliteMaintenanceRepository(SqliteRepositoryBase):
 
     def vacuum(self) -> None:
         with sqlite_write_lock(self._database_path):
-            connection = sqlite3.connect(self._database_path)
+            connection = connect_trusted_sqlite(self._database_path)
             try:
-                configure_connection(connection, busy_timeout_ms=250)
+                configure_connection(connection, busy_timeout_ms=250, database_path=self._database_path)
                 connection.execute("VACUUM")
                 connection.commit()
             finally:
